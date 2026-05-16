@@ -121,24 +121,37 @@ function M.close_build()
 end
 
 -- Open an existing build XML into PoB's GUI (TCP mode: makes it the active build).
--- In headless mode this is a no-op since there is no GUI to switch.
+-- Pass xml=nil (or omit) to create a brand-new empty build using PoB's own defaults.
 function M.open_build_xml(params)
-  if type(params) ~= 'table' or type(params.xml) ~= 'string' then
-    return nil, 'missing xml'
+  if not _G.main or not main.SetMode then
+    return nil, 'main:SetMode not available (headless mode?)'
   end
-  local xml   = params.xml
-  local path  = params.path or ''
-  if _G.main and main.SetMode then
-    -- Switch PoB's GUI to BUILD mode with this XML.
-    -- false = don't prompt "save current build?" (we assume the caller handled it).
-    main:SetMode('BUILD', false, xml, path)
-    -- Give the mode a frame to initialize, then refresh our _G.build reference.
-    if main.modes and main.modes['BUILD'] then
-      _G.build = main.modes['BUILD']
+  local path = (type(params) == 'table' and params.path) or ''
+  local xml  = (type(params) == 'table' and type(params.xml) == 'string') and params.xml or nil
+
+  -- BuildMode:Init(dbFileName, buildName, buildXML, ...)
+  -- dbFileName = nil  → new unsaved build
+  -- buildName must be non-nil or Init() immediately returns to LIST mode
+  -- BuildMode:Init(dbFileName, buildName, buildXML, ...)
+  -- dbFileName = false → new/unsaved build (matches how PoB itself creates new builds)
+  -- dbFileName = path  → loading from file
+  local buildName = (type(params) == 'table' and params.name) or 'New Build'
+  if xml then
+    if path ~= '' then
+      main:SetMode('BUILD', path, buildName, xml)
+    else
+      main:SetMode('BUILD', false, buildName, xml)
     end
-    return { ok = true }
+  else
+    main:SetMode('BUILD', false, buildName)
   end
-  return nil, 'main:SetMode not available (headless mode?)'
+
+  -- Refresh _G.build reference (may take a frame or two to fully initialize).
+  if main.modes and main.modes['BUILD'] then
+    _G.build = main.modes['BUILD']
+  end
+  local ready = _G.build and _G.build.calcsTab and _G.build.importTab and true or false
+  return { ok = true, ready = ready }
 end
 
 function M.export_build_xml()
