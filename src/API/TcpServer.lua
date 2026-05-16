@@ -131,6 +131,13 @@ end
 function M.pump()
   if not server then return end
 
+  local ok, err = pcall(M._pump_inner)
+  if not ok then
+    io.stderr:write('[TcpServer] pump error (continuing): ' .. tostring(err) .. '\n')
+  end
+end
+
+function M._pump_inner()
   refresh_build()
 
   -- Accept new connections
@@ -138,7 +145,7 @@ function M.pump()
   if client then
     client:settimeout(0)
     -- Send ready banner immediately on connect
-    write_line(client, { ok = true, ready = true, version = get_version_meta() })
+    pcall(write_line, client, { ok = true, ready = true, version = get_version_meta() })
     table.insert(clients, { sock = client, buf = '' })
     io.stderr:write('[TcpServer] Client connected\n')
   end
@@ -161,33 +168,34 @@ function M.pump()
       c.buf = c.buf:sub(nl + 1)
 
       if line ~= '' then
-        local msg = json.decode(line)
+        local ok2, msg = pcall(json.decode, line)
+        msg = ok2 and msg or nil
         if not msg or type(msg) ~= 'table' then
-          write_line(c.sock, { ok = false, error = 'invalid json' })
+          pcall(write_line, c.sock, { ok = false, error = 'invalid json' })
         else
           local action = msg.action
           local params = msg.params or {}
 
           if action == 'quit' then
             -- Disconnect this client only — PoB keeps running
-            write_line(c.sock, { ok = true, message = 'disconnected' })
+            pcall(write_line, c.sock, { ok = true, message = 'disconnected' })
             c.sock:close()
             recv_err = 'closed'
           elseif action == 'load_build_xml' or action == 'new_build' then
             -- These don't make sense in TCP/GUI mode
-            write_line(c.sock, { ok = false, error =
+            pcall(write_line, c.sock, { ok = false, error =
               'Use the PoB GUI to open/create builds in TCP mode. ' ..
               'In TCP mode you work with the build already open in PoB.' })
           else
             local handler = handlers and handlers[action]
             if not handler then
-              write_line(c.sock, { ok = false, error = 'unknown action: ' .. tostring(action) })
+              pcall(write_line, c.sock, { ok = false, error = 'unknown action: ' .. tostring(action) })
             else
               local ok2, res = pcall(handler, params)
               if not ok2 then
-                write_line(c.sock, { ok = false, error = 'exception: ' .. tostring(res) })
+                pcall(write_line, c.sock, { ok = false, error = 'exception: ' .. tostring(res) })
               else
-                write_line(c.sock, res)
+                pcall(write_line, c.sock, res)
               end
             end
           end
