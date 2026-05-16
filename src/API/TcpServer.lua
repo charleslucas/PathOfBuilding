@@ -107,6 +107,7 @@ local function refresh_build()
   end
 end
 
+
 -- ── Background keepalive ──────────────────────────────────────────────────────
 -- SimpleGraphic calls GetMessageW (blocking) when PoB loses focus, which
 -- freezes the frame loop and stops our TCP pump.  We work around this by
@@ -180,7 +181,6 @@ local client_count = 0
 
 function M._pump_inner()
   refresh_build()
-
   -- Accept new connections
   local client, _err = server:accept()
   if client then
@@ -235,14 +235,12 @@ function M._pump_inner()
               pcall(write_line, c.sock, { ok = false, error = 'unknown action: ' .. tostring(action) })
             else
               ConPrintf('[PoB API] >> %s', action)
-              local t0 = os.clock()
               local ok3, res = pcall(handler, params)
-              local ms = math.floor((os.clock() - t0) * 1000)
               if not ok3 then
-                ConPrintf('[PoB API] !! %s failed (%dms): %s', action, ms, tostring(res):sub(1, 80))
+                ConPrintf('[PoB API] !! %s failed: %s', action, tostring(res):sub(1, 80))
                 pcall(write_line, c.sock, { ok = false, error = 'exception: ' .. tostring(res) })
               else
-                ConPrintf('[PoB API] << %s ok (%dms)', action, ms)
+                ConPrintf('[PoB API] << %s ok', action)
                 pcall(write_line, c.sock, res)
               end
             end
