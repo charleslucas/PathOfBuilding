@@ -462,8 +462,12 @@ function TreeTabClass:Load(xml, dbFileName)
 					return true
 				end
 				local newSpec = new("PassiveSpec", self.build, node.attrib.treeVersion or defaultTreeVersion)
-				newSpec:Load(node, dbFileName)
-				t_insert(self.specList, newSpec)
+				local loadOk, loadErr = pcall(newSpec.Load, newSpec, node, dbFileName)
+				if loadOk then
+					t_insert(self.specList, newSpec)
+				else
+					io.stderr:write(string.format("[PoB API] Warning: spec load failed (%s), using default spec\n", tostring(loadErr)))
+				end
 			end
 		end
 	end

@@ -284,9 +284,15 @@ end
 local function readLUT(seed, nodeID, jewelType)
 	loadTimelessJewel(jewelType, nodeID)
 	if jewelType == 1 then
-		assert(next(data.timelessJewelLUTs[jewelType].data), "Error occurred loading Glorious Vanity data")
+		if not next(data.timelessJewelLUTs[jewelType].data) then
+			ConPrintf("[Headless] Timeless Jewel (Glorious Vanity) data unavailable — jewel effects skipped")
+			return {}
+		end
 	else
-		assert(data.timelessJewelLUTs[jewelType].data, "Error occurred loading Timeless Jewel data")
+		if not data.timelessJewelLUTs[jewelType].data then
+			ConPrintf("[Headless] Timeless Jewel data unavailable — jewel effects skipped")
+			return {}
+		end
 	end
 	 -- "Elegant Hubris"
 	if jewelType == 5 then

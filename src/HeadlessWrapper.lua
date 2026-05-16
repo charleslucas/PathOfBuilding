@@ -85,21 +85,42 @@ function IsKeyDown(keyName) end
 function Copy(text) end
 function Paste() end
 function Deflate(data)
-	-- TODO: Might need this
-	return ""
+	-- zlib not available in headless mode
+	return nil
 end
 function Inflate(data)
-	-- TODO: And this
-	return ""
+	-- zlib not available in headless mode; return nil so callers treat it as missing data
+	if not data or data == "" then return nil end
+	-- Attempt to use LuaJIT FFI with the bundled zlib1.dll
+	local ok, ffi = pcall(require, 'ffi')
+	if ok and ffi then
+		local ok2, zlib = pcall(ffi.load, 'zlib1')
+		if ok2 and zlib then
+			pcall(function()
+				ffi.cdef[[
+					int uncompress(unsigned char *dest, unsigned long *destLen,
+					               const unsigned char *source, unsigned long sourceLen);
+				]]
+			end)
+			local outLen = ffi.new('unsigned long[1]', #data * 20 + 65536)
+			local out = ffi.new('unsigned char[?]', outLen[0])
+			local src = ffi.cast('const unsigned char*', data)
+			local ret = pcall(function() return zlib.uncompress(out, outLen, src, #data) end)
+			if ret then
+				return ffi.string(out, outLen[0])
+			end
+		end
+	end
+	return nil
 end
 function GetTime()
 	return 0
 end
 function GetScriptPath()
-	return ""
+	return rawget(_G, 'POB_SCRIPT_DIR') or ""
 end
 function GetRuntimePath()
-	return ""
+	return rawget(_G, 'POB_SCRIPT_DIR') or ""
 end
 function GetUserPath()
 	return ""

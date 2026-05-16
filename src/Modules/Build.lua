@@ -974,8 +974,9 @@ function buildMode:Save(xml)
 		t_insert(xml, { elem = "Spectre", attrib = { id = id } })
 	end
 	local addedStatNames = { }
+	local mainSkillFlags = self.calcsTab and self.calcsTab.mainEnv and self.calcsTab.mainEnv.player and self.calcsTab.mainEnv.player.mainSkill and self.calcsTab.mainEnv.player.mainSkill.skillFlags or {}
 	for index, statData in ipairs(self.displayStats) do
-		if matchFlags(statData.flag, statData.notFlag, self.calcsTab.mainEnv.player.mainSkill.skillFlags) then
+		if matchFlags(statData.flag, statData.notFlag, mainSkillFlags) then
 			local statName = statData.stat and statData.stat..(statData.childStat or "")
 			if statName and not addedStatNames[statName] then
 				if statData.stat == "SkillDPS" then

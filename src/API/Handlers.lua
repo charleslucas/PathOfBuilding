@@ -241,6 +241,81 @@ handlers.search_nodes = function(params)
   return { ok = true, results = res }
 end
 
+handlers.save_build = function(params)
+  if not params or type(params.path) ~= 'string' then
+    return { ok = false, error = 'missing path' }
+  end
+  local res, err = BuildOps.save_build(params.path)
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.list_specs = function(params)
+  local res, err = BuildOps.list_specs()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.select_spec = function(params)
+  if not params or params.index == nil then return { ok = false, error = 'missing index' } end
+  local res, err = BuildOps.select_spec(tonumber(params.index))
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.create_spec = function(params)
+  local res, err = BuildOps.create_spec(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.delete_spec = function(params)
+  if not params or params.index == nil then return { ok = false, error = 'missing index' } end
+  local res, err = BuildOps.delete_spec(tonumber(params.index))
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.rename_spec = function(params)
+  if not params or params.index == nil or params.title == nil then
+    return { ok = false, error = 'missing index or title' }
+  end
+  local res, err = BuildOps.rename_spec(tonumber(params.index), tostring(params.title))
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.list_item_sets = function(params)
+  local res, err = BuildOps.list_item_sets()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.select_item_set = function(params)
+  if not params or params.id == nil then return { ok = false, error = 'missing id' } end
+  local res, err = BuildOps.select_item_set(tonumber(params.id))
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.get_mastery_options = function(params)
+  local res, err = BuildOps.get_mastery_options()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.set_socket_group_enabled = function(params)
+  local res, err = BuildOps.set_socket_group_enabled(params or {})
+  if not res then return { ok = false, error = err or 'failed' } end
+  return { ok = true, result = res }
+end
+
+handlers.set_gem_enabled = function(params)
+  local ok2, err = BuildOps.set_gem_enabled(params or {})
+  if not ok2 then return { ok = false, error = err or 'failed' } end
+  return { ok = true }
+end
+
 return {
   handlers = handlers,
   version_meta = version_meta,

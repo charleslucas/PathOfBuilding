@@ -114,9 +114,28 @@ function M.export_build_xml()
   if not build or not build.SaveDB then
     return nil, 'build not initialized'
   end
+  -- Ensure the calculation environment (mainEnv) is populated before saving,
+  -- since Build:Save() references calcsTab.mainEnv for PlayerStat elements.
+  if build.calcsTab and build.calcsTab.BuildOutput then
+    pcall(build.calcsTab.BuildOutput, build.calcsTab)
+  end
   local xml = build:SaveDB('api-export')
   if not xml then return nil, 'failed to compose xml' end
   return xml
+end
+
+-- Save build XML to a file path
+function M.save_build(filePath)
+  if not filePath or type(filePath) ~= 'string' or filePath == '' then
+    return nil, 'missing or invalid file path'
+  end
+  local xml, err = M.export_build_xml()
+  if not xml then return nil, err end
+  local f, ferr = io.open(filePath, 'w')
+  if not f then return nil, 'cannot open file for writing: ' .. tostring(ferr) end
+  f:write(xml)
+  f:close()
+  return { size = #xml, path = filePath }
 end
 
 -- Set player level and rebuild
@@ -728,6 +747,223 @@ function M.search_nodes(params)
   end)
 
   return { nodes = results, count = #results }
+end
+
+
+-- ============================================================
+-- Spec (passive tree spec) management
+-- ============================================================
+
+local function spec_info(spec, index, activeIndex)
+  return {
+    index = index,
+    title = spec.title or ('Spec ' .. tostring(index)),
+    className = spec.curClassName or 'Unknown',
+    ascendClassName = spec.curAscendClassName or 'None',
+    nodeCount = spec.allocNodes and (function() local n=0; for _ in pairs(spec.allocNodes) do n=n+1 end; return n end)() or 0,
+    treeVersion = spec.treeVersion,
+    active = (index == activeIndex),
+  }
+end
+
+local function get_spec_list()
+  if not build or not build.treeTab then return nil, 'build not initialized' end
+  local tt = build.treeTab
+  local specs = tt.specList or {}
+  local activeIdx = tt.activeSpec or 1
+  local result = {}
+  for i, spec in ipairs(specs) do
+    table.insert(result, spec_info(spec, i, activeIdx))
+  end
+  return { specs = result, activeSpec = activeIdx }
+end
+
+function M.list_specs()
+  return get_spec_list()
+end
+
+function M.select_spec(index)
+  if not build or not build.treeTab then return nil, 'build not initialized' end
+  local tt = build.treeTab
+  local specs = tt.specList or {}
+  if not specs[index] then return nil, 'spec index out of range: ' .. tostring(index) end
+  tt.activeSpec = index
+  build.spec = specs[index]
+  M.get_main_output()
+  return get_spec_list()
+end
+
+function M.create_spec(params)
+  if not build or not build.treeTab then return nil, 'build not initialized' end
+  local tt = build.treeTab
+  local specs = tt.specList or {}
+  -- Clone from an existing spec or create empty
+  local newSpec
+  if params and params.copyFrom and specs[params.copyFrom] then
+    -- Deep copy the source spec's nodes/masteries; reuse same spec object structure
+    local src = specs[params.copyFrom]
+    newSpec = { treeVersion = src.treeVersion, curClassId = src.curClassId, curAscendClassId = src.curAscendClassId,
+                curClassName = src.curClassName, curAscendClassName = src.curAscendClassName,
+                allocNodes = {}, masterySelections = {}, title = params.title or (src.title .. ' (copy)') }
+    for id, v in pairs(src.allocNodes or {}) do newSpec.allocNodes[id] = v end
+    for id, v in pairs(src.masterySelections or {}) do newSpec.masterySelections[id] = v end
+  else
+    newSpec = { treeVersion = latestTreeVersion, curClassId = 0, curAscendClassId = 0,
+                curClassName = 'Scion', curAscendClassName = 'None',
+                allocNodes = {}, masterySelections = {}, title = params and params.title or ('Spec ' .. tostring(#specs + 1)) }
+  end
+  table.insert(specs, newSpec)
+  tt.specList = specs
+  local newIdx = #specs
+  if params and params.activate then
+    tt.activeSpec = newIdx
+    build.spec = newSpec
+    M.get_main_output()
+  end
+  return get_spec_list()
+end
+
+function M.delete_spec(index)
+  if not build or not build.treeTab then return nil, 'build not initialized' end
+  local tt = build.treeTab
+  local specs = tt.specList or {}
+  if #specs <= 1 then return nil, 'cannot delete the last spec' end
+  if not specs[index] then return nil, 'spec index out of range: ' .. tostring(index) end
+  table.remove(specs, index)
+  -- Adjust active spec index if needed
+  if tt.activeSpec >= index and tt.activeSpec > 1 then
+    tt.activeSpec = tt.activeSpec - 1
+  end
+  build.spec = specs[tt.activeSpec]
+  M.get_main_output()
+  return get_spec_list()
+end
+
+function M.rename_spec(index, title)
+  if not build or not build.treeTab then return nil, 'build not initialized' end
+  local tt = build.treeTab
+  local specs = tt.specList or {}
+  if not specs[index] then return nil, 'spec index out of range: ' .. tostring(index) end
+  specs[index].title = tostring(title)
+  return get_spec_list()
+end
+
+
+-- ============================================================
+-- Item set management
+-- ============================================================
+
+local function itemset_info(set, id, activeId)
+  return {
+    id = id,
+    title = set.title or ('Item Set ' .. tostring(id)),
+    useSecondWeaponSet = set.useSecondWeaponSet == true,
+    active = (id == activeId),
+  }
+end
+
+local function get_itemset_list()
+  if not build or not build.itemsTab then return nil, 'build not initialized' end
+  local it = build.itemsTab
+  local sets = it.itemSets or {}
+  local order = it.itemSetOrderList or {}
+  local activeId = it.activeItemSetId or 1
+  local result = {}
+  for _, id in ipairs(order) do
+    local set = sets[id]
+    if set then
+      table.insert(result, itemset_info(set, id, activeId))
+    end
+  end
+  return { itemSets = result, activeItemSetId = activeId }
+end
+
+function M.list_item_sets()
+  return get_itemset_list()
+end
+
+function M.select_item_set(id)
+  if not build or not build.itemsTab then return nil, 'build not initialized' end
+  local it = build.itemsTab
+  local sets = it.itemSets or {}
+  if not sets[id] then return nil, 'item set id not found: ' .. tostring(id) end
+  if it.SetActiveItemSet then
+    it:SetActiveItemSet(id)
+  else
+    it.activeItemSetId = id
+    it.activeItemSet = sets[id]
+  end
+  build.buildFlag = true
+  M.get_main_output()
+  return get_itemset_list()
+end
+
+
+-- ============================================================
+-- Mastery options
+-- ============================================================
+
+function M.get_mastery_options()
+  if not build or not build.spec then return nil, 'build not initialized' end
+  local spec = build.spec
+  local result = {}
+  for id, node in pairs(spec.nodes or {}) do
+    if node.isMastery and not node.ascendancyName then
+      local options = {}
+      for _, effect in ipairs(node.masteryEffects or {}) do
+        local selected = (spec.masterySelections and spec.masterySelections[node.id] == effect.id)
+        table.insert(options, { effectId = effect.id, stats = effect.sd or {}, selected = selected })
+      end
+      if #options > 0 then
+        table.insert(result, { nodeId = id, name = node.name or 'Mastery', options = options })
+      end
+    end
+  end
+  return { masteries = result }
+end
+
+
+-- ============================================================
+-- Socket group and gem enable/disable toggles
+-- ============================================================
+
+function M.set_socket_group_enabled(params)
+  if not build or not build.skillsTab then return nil, 'skills not initialized' end
+  if type(params) ~= 'table' then return nil, 'invalid params' end
+  if params.groupIndex == nil or params.enabled == nil then return nil, 'missing groupIndex or enabled' end
+  local skillSetId = build.skillsTab.activeSkillSetId or 1
+  local skillSet = build.skillsTab.skillSets[skillSetId]
+  if not skillSet then return nil, 'active skill set not found' end
+  local groupIndex = tonumber(params.groupIndex)
+  local socketGroup = skillSet.socketGroupList[groupIndex]
+  if not socketGroup then return nil, 'socket group not found at index ' .. tostring(groupIndex) end
+  socketGroup.enabled = params.enabled == true
+  if build.skillsTab.ProcessSocketGroup then build.skillsTab:ProcessSocketGroup(socketGroup) end
+  build.buildFlag = true
+  M.get_main_output()
+  return { groupIndex = groupIndex, label = socketGroup.label or '', enabled = socketGroup.enabled }
+end
+
+function M.set_gem_enabled(params)
+  if not build or not build.skillsTab then return nil, 'skills not initialized' end
+  if type(params) ~= 'table' then return nil, 'invalid params' end
+  if not params.groupIndex or not params.gemIndex or params.enabled == nil then
+    return nil, 'missing groupIndex, gemIndex, or enabled'
+  end
+  local skillSetId = build.skillsTab.activeSkillSetId or 1
+  local skillSet = build.skillsTab.skillSets[skillSetId]
+  if not skillSet then return nil, 'active skill set not found' end
+  local groupIndex = tonumber(params.groupIndex)
+  local gemIndex = tonumber(params.gemIndex)
+  local socketGroup = skillSet.socketGroupList[groupIndex]
+  if not socketGroup then return nil, 'socket group not found' end
+  local gemInstance = socketGroup.gemList[gemIndex]
+  if not gemInstance then return nil, 'gem not found' end
+  gemInstance.enabled = params.enabled == true
+  if build.skillsTab.ProcessSocketGroup then build.skillsTab:ProcessSocketGroup(socketGroup) end
+  build.buildFlag = true
+  M.get_main_output()
+  return true
 end
 
 return M
