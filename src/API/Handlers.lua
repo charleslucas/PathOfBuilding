@@ -340,6 +340,75 @@ handlers.generate_weighted_trade_query = function(params)
   return { ok = true, query = res.query, warning = res.warning }
 end
 
+-- ---------------------------------------------------------------------------
+-- Character import handlers
+-- Node.js fetches the JSON bodies from pathofexile.com and forwards them here.
+-- We delegate directly to the existing ImportTab methods; the controls table
+-- already exists (created in ImportTab:Init), so we only need to patch the
+-- boolean state fields the import functions read before calling them.
+-- ---------------------------------------------------------------------------
+
+handlers.import_passive_tree = function(params)
+  if not params or type(params.json) ~= 'string' then
+    return { ok = false, error = 'missing json' }
+  end
+  if not build or not build.importTab then
+    return { ok = false, error = 'build not initialized' }
+  end
+
+  local charData = params.char_data
+  if type(charData) ~= 'table' then
+    return { ok = false, error = 'missing char_data' }
+  end
+
+  -- Patch the GUI control states the import function reads
+  local clearJewels = params.clear_jewels ~= false
+  build.importTab.controls.charImportTreeClearJewels = { state = clearJewels }
+
+  local ok, err = pcall(build.importTab.ImportPassiveTreeAndJewels, build.importTab, params.json, charData)
+  if not ok then
+    return { ok = false, error = 'import_passive_tree exception: ' .. tostring(err) }
+  end
+
+  local info, infoErr = BuildOps.get_build_info()
+  if not info then return { ok = false, error = infoErr } end
+  BuildOps.get_main_output()
+  return {
+    ok            = true,
+    status        = 'Passive tree imported',
+    level         = info.level,
+    className     = info.className,
+    ascendClassName = info.ascendClassName,
+  }
+end
+
+handlers.import_items_skills = function(params)
+  if not params or type(params.json) ~= 'string' then
+    return { ok = false, error = 'missing json' }
+  end
+  if not build or not build.importTab then
+    return { ok = false, error = 'build not initialized' }
+  end
+
+  -- Patch the GUI control states the import function reads
+  build.importTab.controls.charImportItemsClearItems        = { state = params.clear_items ~= false }
+  build.importTab.controls.charImportItemsClearSkills       = { state = params.clear_skills ~= false }
+  build.importTab.controls.charImportItemsIgnoreWeaponSwap  = { state = params.ignore_weapon_swap == true }
+
+  local ok, charData = pcall(build.importTab.ImportItemsAndSkills, build.importTab, params.json)
+  if not ok then
+    return { ok = false, error = 'import_items_skills exception: ' .. tostring(charData) }
+  end
+
+  BuildOps.get_main_output()
+  return {
+    ok        = true,
+    status    = 'Items and skills imported',
+    level     = type(charData) == 'table' and charData.level or nil,
+    character = type(charData) == 'table' and charData or nil,
+  }
+end
+
 return {
   handlers = handlers,
   version_meta = version_meta,
