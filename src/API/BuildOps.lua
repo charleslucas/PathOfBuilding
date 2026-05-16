@@ -110,6 +110,27 @@ function M.set_tree(params)
 end
 
 -- Export full build XML
+-- Open an existing build XML into PoB's GUI (TCP mode: makes it the active build).
+-- In headless mode this is a no-op since there is no GUI to switch.
+function M.open_build_xml(params)
+  if type(params) ~= 'table' or type(params.xml) ~= 'string' then
+    return nil, 'missing xml'
+  end
+  local xml   = params.xml
+  local path  = params.path or ''
+  if _G.main and main.SetMode then
+    -- Switch PoB's GUI to BUILD mode with this XML.
+    -- false = don't prompt "save current build?" (we assume the caller handled it).
+    main:SetMode('BUILD', false, xml, path)
+    -- Give the mode a frame to initialize, then refresh our _G.build reference.
+    if main.modes and main.modes['BUILD'] then
+      _G.build = main.modes['BUILD']
+    end
+    return { ok = true }
+  end
+  return nil, 'main:SetMode not available (headless mode?)'
+end
+
 function M.export_build_xml()
   if not build or not build.SaveDB then
     return nil, 'build not initialized'

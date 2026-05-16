@@ -152,6 +152,12 @@ handlers.export_build_xml = function(params)
   return { ok = true, xml = xml }
 end
 
+handlers.open_build_xml = function(params)
+  local res, err = BuildOps.open_build_xml(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true }
+end
+
 handlers.set_level = function(params)
   if not params or params.level == nil then
     return { ok = false, error = 'missing level' }
