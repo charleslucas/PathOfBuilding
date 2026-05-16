@@ -107,6 +107,43 @@ local function refresh_build()
   end
 end
 
+-- ── Background keepalive ──────────────────────────────────────────────────────
+-- SimpleGraphic calls GetMessageW (blocking) when PoB loses focus, which
+-- freezes the frame loop and stops our TCP pump.  We work around this by
+-- launching a background subscript that posts WM_NULL to PoB's window every
+-- ~16 ms.  This unblocks GetMessageW so the frame loop keeps ticking and our
+-- pump() keeps running, even while PoB is in the background.
+-- Use level-1 long brackets [=[ ... ]=] so that the ffi.cdef[[ ]] inside does
+-- not accidentally close the outer string.
+local keepalive_script = [=[
+local ok_ffi, ffi = pcall(require, 'ffi')
+if not ok_ffi then return end
+ffi.cdef[[
+  void* FindWindowA(const char* c, const char* t);
+  int   PostMessageA(void* h, unsigned int m, unsigned long w, long l);
+  void  Sleep(unsigned long ms);
+]]
+local u32 = ffi.load('user32')
+local k32 = ffi.load('kernel32')
+local hwnd = u32.FindWindowA(nil, 'Path of Building')
+if hwnd == nil then return end
+ConPrintf('[PoB API] Background keepalive started (window=0x%x)', tonumber(ffi.cast('unsigned long', hwnd)))
+while true do
+  u32.PostMessageA(hwnd, 0, 0, 0)  -- WM_NULL: unblocks GetMessageW harmlessly
+  k32.Sleep(16)                     -- ~60 fps target
+end
+]=]
+
+local function start_keepalive()
+  if not _G.LaunchSubScript then return end  -- headless mode has no subscripts
+  local ok, err = pcall(function()
+    LaunchSubScript(keepalive_script, 'GetScriptPath', 'ConPrintf')
+  end)
+  if not ok then
+    io.stderr:write('[TcpServer] keepalive subscript failed: ' .. tostring(err) .. '\n')
+  end
+end
+
 -- ── Public API ────────────────────────────────────────────────────────────────
 
 --- Start listening.
@@ -124,6 +161,7 @@ function M.init(h, port)
   end
   server:settimeout(0)  -- non-blocking accept
   io.stderr:write(string.format('[TcpServer] Listening on 127.0.0.1:%d\n', port))
+  start_keepalive()
   return true
 end
 
