@@ -110,12 +110,22 @@ end
 
 -- ── Background keepalive ──────────────────────────────────────────────────────
 -- SimpleGraphic calls GetMessageW (blocking) when PoB loses focus, which
--- freezes the frame loop and stops our TCP pump.  We work around this by
--- launching a background subscript that posts WM_NULL to PoB's window every
--- ~16 ms.  This unblocks GetMessageW so the frame loop keeps ticking and our
--- pump() keeps running, even while PoB is in the background.
--- Use level-1 long brackets [=[ ... ]=] so that the ffi.cdef[[ ]] inside does
--- not accidentally close the outer string.
+-- freezes the frame loop and stops our TCP pump.  We use a background
+-- subscript (LaunchSubScript) to post WM_NULL every ~16 ms — this unblocks
+-- GetMessageW and keeps the render loop cycling at ~60 fps in the background.
+--
+-- WM_NULL (PostMessageA) is used rather than SetTimer because WM_TIMER is a
+-- synthesized low-priority message that does NOT trigger SimpleGraphic's
+-- render path, while a real posted WM_NULL does.
+--
+-- Exit: PostMessageA returns 0 when the window is destroyed (PoB shutting
+-- down), which breaks the loop so the subscript exits cleanly.
+-- Sentinel file path used to signal the keepalive subscript to stop.
+-- The file exists while the TCP server is running; deleting it causes the
+-- subscript to exit immediately rather than waiting for the window handle
+-- to become invalid (which can take several seconds during shutdown).
+local sentinel_path = './pob-api.run'
+
 local keepalive_script = [=[
 local ok_ffi, ffi = pcall(require, 'ffi')
 if not ok_ffi then return end
@@ -128,20 +138,34 @@ local u32 = ffi.load('user32')
 local k32 = ffi.load('kernel32')
 local hwnd = u32.FindWindowA(nil, 'Path of Building')
 if hwnd == nil then return end
-ConPrintf('[PoB API] Background keepalive started (window=0x%x)', tonumber(ffi.cast('unsigned long', hwnd)))
+-- sentinel_path is passed in as the first subscript argument (...)
+local sentinel = ...
+ConPrintf('[PoB API] Background keepalive active (~60 fps)')
 while true do
-  u32.PostMessageA(hwnd, 0, 0, 0)  -- WM_NULL: unblocks GetMessageW harmlessly
-  k32.Sleep(16)                     -- ~60 fps target
+  -- Primary exit: sentinel file deleted by M.stop() when PoB shuts down
+  local f = io.open(sentinel, 'r')
+  if not f then break end
+  f:close()
+  -- Fallback exit: PostMessageA returns 0 when window handle is invalid
+  local ok = u32.PostMessageA(hwnd, 0, 0, 0)
+  if ok == 0 then break end
+  k32.Sleep(16)
 end
 ]=]
 
 local function start_keepalive()
   if not _G.LaunchSubScript then return end  -- headless mode has no subscripts
-  local ok, err = pcall(function()
-    LaunchSubScript(keepalive_script, 'GetScriptPath', 'ConPrintf')
+  -- Create sentinel file — its existence signals "keep running"
+  local sf = io.open(sentinel_path, 'w')
+  if sf then sf:close() end
+  local id, err = pcall(function()
+    return LaunchSubScript(keepalive_script, 'GetScriptPath', 'ConPrintf', sentinel_path)
   end)
-  if not ok then
-    io.stderr:write('[TcpServer] keepalive subscript failed: ' .. tostring(err) .. '\n')
+  -- id here is the pcall ok flag; the actual ID is in err when ok=true
+  local script_id = id and err or nil
+  if script_id and _G.launch and launch.RegisterSubScript then
+    -- Register so OnSubFinished doesn't crash when the subscript exits
+    launch:RegisterSubScript(script_id, nil)
   end
 end
 
@@ -162,6 +186,17 @@ function M.init(h, port)
   end
   server:settimeout(0)  -- non-blocking accept
   io.stderr:write(string.format('[TcpServer] Listening on 127.0.0.1:%d\n', port))
+
+  -- Hook main.Shutdown so the keepalive stops instantly when PoB exits,
+  -- rather than waiting for the window handle to become invalid.
+  if _G.main and main.Shutdown then
+    local _orig = main.Shutdown
+    main.Shutdown = function(self2, ...)
+      M.stop()
+      return _orig(self2, ...)
+    end
+  end
+
   start_keepalive()
   return true
 end
@@ -261,6 +296,9 @@ end
 
 --- Stop the server and disconnect all clients.
 function M.stop()
+  -- Delete sentinel file first — this causes the keepalive subscript to exit
+  -- immediately on its next iteration, so PoB can shut down without delay.
+  os.remove(sentinel_path)
   for _, c in ipairs(clients) do
     pcall(function() c.sock:close() end)
   end
