@@ -275,6 +275,26 @@ the "Releases" section of the GitHub page.]])
 		end
 	end
 
+	-- TCP API server: start if POB_API_TCP=1 is set in the environment.
+	-- The server is pumped every frame via onFrameFuncs so it never blocks the GUI.
+	if os.getenv('POB_API_TCP') == '1' then
+		local tcpPort = tonumber(os.getenv('POB_API_TCP_PORT')) or 31337
+		local ok_h, API = pcall(require, 'API.Handlers')
+		if ok_h and API then
+			local ok_t, TcpServer = pcall(require, 'API.TcpServer')
+			if ok_t and TcpServer and TcpServer.available then
+				if TcpServer.init(API.handlers, tcpPort) then
+					self.onFrameFuncs['TcpServer'] = function() TcpServer.pump() end
+					ConPrintf('[PoB API] TCP server started on port %d', tcpPort)
+				end
+			else
+				ConPrintf('[PoB API] TcpServer unavailable: %s', tostring(TcpServer))
+			end
+		else
+			ConPrintf('[PoB API] Could not load API.Handlers: %s', tostring(API))
+		end
+	end
+
 end
 
 function main:DetectUnicodeSupport()
