@@ -365,7 +365,15 @@ handlers.import_passive_tree = function(params)
   local clearJewels = params.clear_jewels ~= false
   build.importTab.controls.charImportTreeClearJewels = { state = clearJewels }
 
+  -- ImportPassiveTreeAndJewels reads the global `charSelectLeague` as a
+  -- DropDownControl object and calls :GetSelValueByKey("league") on it.
+  -- Provide a minimal shim so the call succeeds when invoked via the API.
+  local leagueName = (type(charData) == 'table' and charData.league) or 'Standard'
+  local _origLeague = _G.charSelectLeague
+  _G.charSelectLeague = { GetSelValueByKey = function(_, _) return leagueName end }
+
   local ok, err = pcall(build.importTab.ImportPassiveTreeAndJewels, build.importTab, params.json, charData)
+  _G.charSelectLeague = _origLeague  -- restore so PoB's own UI is unaffected
   if not ok then
     return { ok = false, error = 'import_passive_tree exception: ' .. tostring(err) }
   end
