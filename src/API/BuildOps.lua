@@ -1159,4 +1159,22 @@ function M.generate_weighted_trade_query(params)
   return { query = capturedJson, warning = capturedErr }
 end
 
+function M.get_notes()
+  if not build or not build.notesTab then return nil, 'build/notesTab not initialized' end
+  return { notes = build.notesTab.controls.edit.buf or '' }
+end
+
+function M.set_notes(params)
+  if not build or not build.notesTab then return nil, 'build/notesTab not initialized' end
+  local text = (type(params) == 'table' and type(params.text) == 'string') and params.text or ''
+  if build.notesTab.controls.edit.SetText then
+    build.notesTab.controls.edit:SetText(text)
+  else
+    build.notesTab.controls.edit.buf = text
+  end
+  build.notesTab.modFlag = true
+  build.modFlag = true
+  return { ok = true }
+end
+
 return M

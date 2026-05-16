@@ -199,6 +199,18 @@ handlers.set_config = function(params)
   return { ok = true, config = cfg }
 end
 
+handlers.get_notes = function(params)
+  local res, err = BuildOps.get_notes()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, notes = res.notes }
+end
+
+handlers.set_notes = function(params)
+  local ok2, err = BuildOps.set_notes(params or {})
+  if not ok2 then return { ok = false, error = err } end
+  return { ok = true }
+end
+
 handlers.create_socket_group = function(params)
   local res, err = BuildOps.create_socket_group(params or {})
   if not res then return { ok = false, error = err or 'failed to create socket group' } end
