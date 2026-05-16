@@ -135,6 +135,15 @@ function M.save_build(filePath)
   if not f then return nil, 'cannot open file for writing: ' .. tostring(ferr) end
   f:write(xml)
   f:close()
+  -- Clear PoB's "unsaved changes" flags so the UI doesn't prompt on navigation.
+  if build then
+    build.modFlag = false
+    if build.notesTab  then build.notesTab.modFlag  = false end
+    if build.configTab then build.configTab.modFlag = false end
+    if build.treeTab   then build.treeTab.modFlag   = false end
+    if build.skillsTab then build.skillsTab.modFlag = false end
+    if build.itemsTab  then build.itemsTab.modFlag  = false end
+  end
   return { size = #xml, path = filePath }
 end
 
