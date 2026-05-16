@@ -175,17 +175,20 @@ function M.pump()
   end
 end
 
+-- Track connected client count for console messages
+local client_count = 0
+
 function M._pump_inner()
   refresh_build()
 
   -- Accept new connections
-  local client, err = server:accept()
+  local client, _err = server:accept()
   if client then
     client:settimeout(0)
-    -- Send ready banner immediately on connect
     pcall(write_line, client, { ok = true, ready = true, version = get_version_meta() })
+    client_count = client_count + 1
     table.insert(clients, { sock = client, buf = '' })
-    io.stderr:write('[TcpServer] Client connected\n')
+    ConPrintf('[PoB API] Claude connected (%d client(s) active)', client_count)
   end
 
   -- Service connected clients
@@ -209,30 +212,37 @@ function M._pump_inner()
         local ok2, msg = pcall(json.decode, line)
         msg = ok2 and msg or nil
         if not msg or type(msg) ~= 'table' then
+          ConPrintf('[PoB API] Bad request (invalid JSON)')
           pcall(write_line, c.sock, { ok = false, error = 'invalid json' })
         else
           local action = msg.action
           local params = msg.params or {}
 
           if action == 'quit' then
-            -- Disconnect this client only — PoB keeps running
+            ConPrintf('[PoB API] Claude disconnected (quit)')
             pcall(write_line, c.sock, { ok = true, message = 'disconnected' })
             c.sock:close()
             recv_err = 'closed'
           elseif action == 'load_build_xml' or action == 'new_build' then
-            -- These don't make sense in TCP/GUI mode
+            ConPrintf('[PoB API] Rejected: %s (use PoB GUI in TCP mode)', action)
             pcall(write_line, c.sock, { ok = false, error =
               'Use the PoB GUI to open/create builds in TCP mode. ' ..
               'In TCP mode you work with the build already open in PoB.' })
           else
             local handler = handlers and handlers[action]
             if not handler then
+              ConPrintf('[PoB API] Unknown action: %s', tostring(action))
               pcall(write_line, c.sock, { ok = false, error = 'unknown action: ' .. tostring(action) })
             else
-              local ok2, res = pcall(handler, params)
-              if not ok2 then
+              ConPrintf('[PoB API] >> %s', action)
+              local t0 = os.clock()
+              local ok3, res = pcall(handler, params)
+              local ms = math.floor((os.clock() - t0) * 1000)
+              if not ok3 then
+                ConPrintf('[PoB API] !! %s failed (%dms): %s', action, ms, tostring(res):sub(1, 80))
                 pcall(write_line, c.sock, { ok = false, error = 'exception: ' .. tostring(res) })
               else
+                ConPrintf('[PoB API] << %s ok (%dms)', action, ms)
                 pcall(write_line, c.sock, res)
               end
             end
@@ -244,7 +254,8 @@ function M._pump_inner()
     if recv_err ~= 'closed' then
       table.insert(alive, c)
     else
-      io.stderr:write('[TcpServer] Client disconnected\n')
+      client_count = math.max(0, client_count - 1)
+      ConPrintf('[PoB API] Claude disconnected (%d client(s) active)', client_count)
     end
   end
   clients = alive
