@@ -316,6 +316,30 @@ handlers.set_gem_enabled = function(params)
   return { ok = true }
 end
 
+handlers.evaluate_anoint_candidates = function(params)
+  local res, err = BuildOps.evaluate_anoint_candidates(params or {})
+  if not res then return { ok = false, error = err } end
+  return {
+    ok         = true,
+    candidates = res.candidates,
+    base       = res.base,
+    evaluated  = res.evaluated,
+    skipped    = res.skipped,
+    slot       = res.slot,
+    baseType   = res.baseType,
+    focus      = res.focus,
+  }
+end
+
+handlers.generate_weighted_trade_query = function(params)
+  if not params or type(params.slot) ~= 'string' then
+    return { ok = false, error = 'missing slot' }
+  end
+  local res, err = BuildOps.generate_weighted_trade_query(params)
+  if not res then return { ok = false, error = err } end
+  return { ok = true, query = res.query, warning = res.warning }
+end
+
 return {
   handlers = handlers,
   version_meta = version_meta,

@@ -966,4 +966,197 @@ function M.set_gem_enabled(params)
   return true
 end
 
+
+-- ============================================================
+-- Anointment evaluation
+-- ============================================================
+
+function M.evaluate_anoint_candidates(params)
+  if not build or not build.itemsTab or not build.calcsTab then return nil, 'build not initialized' end
+  local slotName = (params and params.slot) or 'Amulet'
+  local focus    = (params and params.focus) or 'both'
+  local limit    = tonumber(params and params.limit) or 50
+
+  -- Only Amulet and (Cord) Belt support anointment
+  if slotName ~= 'Amulet' and slotName ~= 'Belt' then
+    return nil, 'anointment is only supported for Amulet and Belt slots'
+  end
+
+  local activeItemSet = build.itemsTab.activeItemSet
+  local slotEntry = activeItemSet and activeItemSet[slotName]
+  local item = slotEntry and build.itemsTab.items[slotEntry.selItemId]
+  if not item then
+    return nil, 'no item equipped in slot: ' .. slotName
+  end
+
+  -- Save state, then point displayItem at the target item
+  local savedDisplayItem   = build.itemsTab.displayItem
+  local savedAnointSlot    = build.itemsTab.anointEnchantSlot
+  build.itemsTab.displayItem     = item
+  build.itemsTab.anointEnchantSlot = 1
+
+  -- slotType drives the calc engine replacement slot
+  local slotType = item.base and item.base.type or slotName
+
+  local calcFunc = build.calcsTab:GetMiscCalculator()
+  if not calcFunc then
+    build.itemsTab.displayItem     = savedDisplayItem
+    build.itemsTab.anointEnchantSlot = savedAnointSlot
+    return nil, 'failed to get calc function'
+  end
+
+  -- Base stats without any anoint
+  local baseCalc = calcFunc({ repSlotName = slotType, repItem = build.itemsTab:anointItem(nil) })
+  local baseDPS  = baseCalc and (baseCalc.CombinedDPS or baseCalc.TotalDPS or 0) or 0
+  local baseEHP  = baseCalc and (baseCalc.TotalEHP or 0) or 0
+
+  local candidates = {}
+  local evaluated  = 0
+  local skipped    = 0
+
+  for id, node in pairs(build.spec.nodes or {}) do
+    -- Only anointable notables not already allocated
+    if node.recipe and #node.recipe >= 1 and node.isNotable and not node.isKeystone
+        and not node.ascendancyName and not build.spec.allocNodes[id] then
+      local ok, output = pcall(function()
+        return calcFunc({ repSlotName = slotType, repItem = build.itemsTab:anointItem(node) })
+      end)
+      if ok and output then
+        local dps      = output.CombinedDPS or output.TotalDPS or 0
+        local ehp      = output.TotalEHP or 0
+        local dpsDelta = dps - baseDPS
+        local ehpDelta = ehp - baseEHP
+        local score
+        if focus == 'dps' then
+          score = baseDPS > 0 and (dpsDelta / baseDPS) or dpsDelta
+        elseif focus == 'defence' then
+          score = baseEHP > 0 and (ehpDelta / baseEHP) or ehpDelta
+        else
+          local dpsN = baseDPS > 0 and (dpsDelta / baseDPS) or 0
+          local ehpN = baseEHP > 0 and (ehpDelta / baseEHP) or 0
+          score = dpsN + 0.5 * ehpN
+        end
+        table.insert(candidates, {
+          nodeId   = id,
+          name     = node.dn or node.name or 'Unknown',
+          dpsDelta = dpsDelta,
+          ehpDelta = ehpDelta,
+          score    = score,
+          recipe   = node.recipe,
+        })
+        evaluated = evaluated + 1
+      else
+        skipped = skipped + 1
+      end
+    end
+  end
+
+  -- Restore state
+  build.itemsTab.displayItem     = savedDisplayItem
+  build.itemsTab.anointEnchantSlot = savedAnointSlot
+
+  table.sort(candidates, function(a, b) return a.score > b.score end)
+
+  local top = {}
+  for i = 1, math.min(limit, #candidates) do top[i] = candidates[i] end
+
+  return {
+    candidates = top,
+    base       = { CombinedDPS = baseDPS, TotalEHP = baseEHP },
+    evaluated  = evaluated,
+    skipped    = skipped,
+    slot       = slotName,
+    baseType   = item.baseName or item.name or slotName,
+    focus      = focus,
+  }
+end
+
+
+-- ============================================================
+-- Weighted trade query generation (mirrors PoB's Find Upgrade)
+-- ============================================================
+
+function M.generate_weighted_trade_query(params)
+  if not build or not build.itemsTab then return nil, 'build not initialized' end
+  local slotName = params and params.slot
+  if not slotName then return nil, 'slot is required' end
+
+  local slot = build.itemsTab.slots[slotName]
+  if not slot then return nil, 'slot not found: ' .. tostring(slotName) end
+
+  local tradeQuery = build.itemsTab.tradeQuery
+  if not tradeQuery then return nil, 'tradeQuery not initialized' end
+
+  -- Ensure default stat weights exist
+  if not tradeQuery.statSortSelectionList or #tradeQuery.statSortSelectionList == 0 then
+    tradeQuery.statSortSelectionList = {
+      { label = 'Full DPS',          stat = 'FullDPS',   weightMult = 1.0 },
+      { label = 'Effective Hit Pool', stat = 'TotalEHP', weightMult = 0.5 },
+    }
+  end
+
+  -- Build options with sensible defaults for headless use
+  local options = {
+    influence1       = 1,
+    influence2       = 1,
+    includeCorrupted = false,
+    includeMirrored  = false,
+    includeScourge   = false,
+    includeEldritch  = false,
+    includeSynthesis = false,
+    statWeights      = tradeQuery.statSortSelectionList,
+  }
+
+  -- Apply any caller-supplied overrides
+  if params.options and type(params.options) == 'table' then
+    for k, v in pairs(params.options) do
+      options[k] = v
+    end
+  end
+
+  -- Instantiate a generator against the build's tradeQuery object
+  local ok_gen, gen = pcall(function() return new("TradeQueryGenerator", tradeQuery) end)
+  if not ok_gen or not gen then
+    return nil, 'failed to create TradeQueryGenerator: ' .. tostring(gen)
+  end
+
+  -- Capture result via callback
+  local capturedJson, capturedErr
+  gen.requesterCallback = function(_, queryJson, errMsg)
+    capturedJson = queryJson
+    capturedErr  = errMsg
+  end
+  gen.requesterContext = nil
+
+  -- Launch the query (creates coroutine, opens no-op GUI popup in headless)
+  local ok_start, startErr = pcall(gen.StartQuery, gen, slot, options)
+  if not ok_start then
+    return nil, 'StartQuery failed: ' .. tostring(startErr)
+  end
+
+  -- Drive the coroutine to completion (replaces the OnFrame loop)
+  if gen.calcContext and gen.calcContext.co then
+    local maxIter = 200000
+    local iter = 0
+    while coroutine.status(gen.calcContext.co) ~= 'dead' and iter < maxIter do
+      local ok_resume, resumeErr = coroutine.resume(gen.calcContext.co, gen)
+      if not ok_resume then
+        return nil, 'coroutine error: ' .. tostring(resumeErr)
+      end
+      iter = iter + 1
+    end
+    -- FinishQuery builds the trade JSON and fires the callback
+    local ok_finish, finishErr = pcall(gen.FinishQuery, gen)
+    if not ok_finish then
+      return nil, 'FinishQuery failed: ' .. tostring(finishErr)
+    end
+  end
+
+  if not capturedJson then
+    return nil, capturedErr or 'no query generated'
+  end
+
+  return { query = capturedJson, warning = capturedErr }
+end
+
 return M
