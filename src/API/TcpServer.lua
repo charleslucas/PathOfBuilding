@@ -36,9 +36,37 @@ do
 end
 
 -- ── LuaSocket ────────────────────────────────────────────────────────────────
+-- PoB ships socket.dll with entry point luaopen_socket_core (not luaopen_socket),
+-- so require('socket') fails. Fall back to package.loadlib with the correct name.
 local socket_ok, socket = pcall(require, 'socket')
 if not socket_ok then
-  -- Graceful degradation: return a stub so callers don't crash.
+  local loader = package.loadlib and (
+    package.loadlib('./socket.dll',  'luaopen_socket_core') or
+    package.loadlib('socket.dll',    'luaopen_socket_core')
+  )
+  if loader then
+    local ok2, core = pcall(loader)
+    if ok2 and core then
+      socket    = core
+      socket_ok = true
+      -- socket.core lacks the socket.bind() convenience wrapper from socket.lua;
+      -- add a minimal shim so the rest of TcpServer can use socket.bind() unchanged.
+      if not socket.bind then
+        socket.bind = function(host, port)
+          local srv, err = socket.tcp()
+          if not srv then return nil, err or 'tcp() failed' end
+          pcall(function() srv:setoption('reuseaddr', true) end)
+          local ok3, e2 = srv:bind(host, port)
+          if not ok3 then srv:close(); return nil, e2 end
+          ok3, e2 = srv:listen(5)
+          if not ok3 then srv:close(); return nil, e2 end
+          return srv
+        end
+      end
+    end
+  end
+end
+if not socket_ok then
   io.stderr:write('[TcpServer] LuaSocket not available — TCP mode disabled\n')
   M.available = false
   M.init = function() return false end
