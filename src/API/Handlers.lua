@@ -158,6 +158,12 @@ handlers.open_build_xml = function(params)
   return { ok = true }
 end
 
+handlers.close_build = function(params)
+  local res, err = BuildOps.close_build()
+  if not res then return { ok = false, error = err } end
+  return { ok = true }
+end
+
 handlers.set_level = function(params)
   if not params or params.level == nil then
     return { ok = false, error = 'missing level' }

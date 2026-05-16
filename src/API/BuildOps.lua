@@ -110,6 +110,16 @@ function M.set_tree(params)
 end
 
 -- Export full build XML
+-- Close the current build and return to the build list screen.
+function M.close_build()
+  if _G.main and main.SetMode then
+    main:SetMode('LIST')
+    _G.build = nil
+    return { ok = true }
+  end
+  return nil, 'main:SetMode not available'
+end
+
 -- Open an existing build XML into PoB's GUI (TCP mode: makes it the active build).
 -- In headless mode this is a no-op since there is no GUI to switch.
 function M.open_build_xml(params)
