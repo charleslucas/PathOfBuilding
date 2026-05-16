@@ -361,9 +361,12 @@ handlers.import_passive_tree = function(params)
     return { ok = false, error = 'missing char_data' }
   end
 
-  -- Patch the GUI control states the import function reads
+  -- Set the state on the existing control object rather than replacing it.
+  -- Replacing controls with plain tables breaks the Import tab UI (controls
+  -- lack IsShown() and other methods PoB calls when rendering the tab).
   local clearJewels = params.clear_jewels ~= false
-  build.importTab.controls.charImportTreeClearJewels = { state = clearJewels }
+  local ctrl = build.importTab.controls.charImportTreeClearJewels
+  if ctrl then ctrl.state = clearJewels end
 
   -- ImportPassiveTreeAndJewels reads the global `charSelectLeague` as a
   -- DropDownControl object and calls :GetSelValueByKey("league") on it.
@@ -398,10 +401,11 @@ handlers.import_items_skills = function(params)
     return { ok = false, error = 'build not initialized' }
   end
 
-  -- Patch the GUI control states the import function reads
-  build.importTab.controls.charImportItemsClearItems        = { state = params.clear_items ~= false }
-  build.importTab.controls.charImportItemsClearSkills       = { state = params.clear_skills ~= false }
-  build.importTab.controls.charImportItemsIgnoreWeaponSwap  = { state = params.ignore_weapon_swap == true }
+  -- Set state on existing controls rather than replacing them (see import_passive_tree).
+  local ctrls = build.importTab.controls
+  if ctrls.charImportItemsClearItems       then ctrls.charImportItemsClearItems.state       = params.clear_items ~= false end
+  if ctrls.charImportItemsClearSkills      then ctrls.charImportItemsClearSkills.state      = params.clear_skills ~= false end
+  if ctrls.charImportItemsIgnoreWeaponSwap then ctrls.charImportItemsIgnoreWeaponSwap.state = params.ignore_weapon_swap == true end
 
   local ok, charData = pcall(build.importTab.ImportItemsAndSkills, build.importTab, params.json)
   if not ok then
