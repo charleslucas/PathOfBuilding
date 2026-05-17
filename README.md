@@ -1,63 +1,56 @@
-# Path of Building Community
-## Welcome to Path of Building, an offline build planner for Path of Exile!
+# PathOfBuilding — API Fork (`api-stdio` branch)
 
-<p float="middle">
-  <img alt="Tree tab" src="https://github.com/user-attachments/assets/0826b7ab-84ba-440f-be52-2f216f13e75c" width="48%" />
-  <img alt="Items tab" src="https://github.com/user-attachments/assets/e5af1326-7e22-43d8-ab12-aa5500da611a" width="48%" />
-</p>
+This is a fork of [Path of Building Community](https://github.com/PathOfBuildingCommunity/PathOfBuilding) with a JSON-RPC API layer added to the `api-stdio` branch. It serves as the calculation backend for [pob-mcp](https://github.com/charleslucas/pob-mcp).
 
-### Features
-* Comprehensive offence + defence calculations:
-  * Calculate your skill DPS, damage over time, life/mana/ES totals and much more!
-  * Can factor in auras, buffs, charges, curses, monster resistances and more, to estimate your effective DPS
-  * Also calculates life/mana reservations
-  * Shows a summary of character stats in the side bar, as well as a detailed calculations breakdown tab which can show you how the stats were derived
-  * Supports all skills and support gems, and most passives and item modifiers
-    * Throughout the program, supported modifiers will show in blue and unsupported ones in red
-  * Full support for minions
-  * Support for party play and support builds
-* Passive skill tree planner:
-  * Support for jewels including most radius/conversion and timeless jewels
-  * Features alternate path tracing (mouse over a sequence of nodes while holding shift, then click to allocate them all)
-  * Fully integrated with the offence/defence calculations; see exactly how each node will affect your character!
-  * Can import PathOfExile.com and PoEPlanner.com passive tree links; links shortened with PoEURL.com also work
-* Skill planner:
-  * Add any number of main or supporting skills to your build
-  * Supporting skills (auras, curses, buffs) can be toggled on and off
-  * Automatically applies Socketed Gem modifiers from the item a skill is socketed into
-  * Automatically applies support gems granted by items
-* Item planner:
-  * Add items from in game by copying and pasting them straight into the program!
-  * Automatically adds quality to non-corrupted items
-  * Search the trade site for the most impactful items
-  * Fully integrated with the offence/defence calculations; see exactly how much of an upgrade a given item is!
-  * Contains a searchable database of all uniques that are currently in game (and some that aren't yet!)
-    * You can choose the modifier rolls when you add a unique to your build
-    * Includes all league-specific items and legacy variants
-  * Features an item crafting system:
-    * You can select from any of the game's base item types
-    * You can select prefix/suffix modifiers from lists
-    * Custom modifiers can be added, with Master and Essence modifiers available
-  * Also contains a database of rare item templates:
-    * Allows you to create rare items for your build to approximate the gear you will be using
-    * Choose which modifiers appear on each item, and the rolls for each modifier, to suit your needs
-    * Has templates that should cover the majority of builds
-* Other features:
-  * You can import passive tree, items, and skills from existing characters
-  * Share builds with other users by generating a share code
-  * Automatic updating; most updates will only take a couple of seconds to apply
+## Part of poe_mcp_suite
 
-## Download
-Head over to the [Releases](https://github.com/PathOfBuildingCommunity/PathOfBuilding/releases) page to download the install wizard or portable zip.
+This repository is part of [poe_mcp_suite](https://github.com/charleslucas/poe_mcp_suite) — a collection of MCP servers for Path of Exile designed to work together with Claude. See the suite repo for an overview of all available servers and tools.
 
-## Changelog
-You can find the full version history [here](CHANGELOG.md).
+---
 
-## Contribute
-You can find instructions on how to contribute code and bug reports [here](CONTRIBUTING.md).
+## What this fork adds
 
-## Licence
-[MIT](https://opensource.org/licenses/MIT)
+The `api-stdio` branch adds `src/API/` — a thin JSON-RPC API layer that exposes PoB's full calculation engine over either:
 
-For 3rd-party licences, see [LICENSE](LICENSE.md).
-The licencing information is considered to be part of the documentation.
+- **TCP socket** (live GUI mode): Claude connects to a running PoB GUI via `TcpServer.lua`. Every change appears in the PoB window in real time. PoB can be minimised — a background keepalive keeps its frame loop running at ~60 fps.
+- **stdio** (headless mode): `HeadlessWrapper.lua` spawns a LuaJIT process that loads and calculates builds without a GUI.
+
+Both modes share the same `Handlers.lua` / `BuildOps.lua` API surface. See [`src/API/TOOLS.md`](src/API/TOOLS.md) for the full list of available actions.
+
+### Key additions
+
+| File | Purpose |
+|------|---------|
+| `src/API/TcpServer.lua` | Non-blocking TCP server pumped by PoB's frame loop via `onFrameFuncs` |
+| `src/API/Handlers.lua` | JSON-RPC dispatcher — maps action names to `BuildOps` calls |
+| `src/API/BuildOps.lua` | All build read/write operations (tree, items, gems, stats, mastery, config) |
+| `src/API/TOOLS.md` | Full action reference with parameter docs and implementation notes |
+| `LaunchPoBWithAPI.bat` | *(in pob-mcp repo)* Launches PoB with TCP env vars and auto-patches `Main.lua` |
+
+### Notable implementation notes
+
+- `calc_with` temporarily sets `build.viewMode = "CALCULATOR"` before calling `calcFunc(override, false)` to bypass the 30+ second `calcFullDPS` path that fires when the passive tree tab is open.
+- The `handlers.calc_with` response returns only JSON-safe scalar fields — the raw `env.player.output` table contains Lua functions and userdata that `dkjson` cannot encode.
+- Mastery effect simulation patches `allocNode.sd` and `node.modList` directly via `tree:ProcessStats(node)` because `calcs.initEnv` ignores `override.masteryEffects`.
+
+---
+
+## Launching with the TCP API
+
+Use `LaunchPoBWithAPI.bat` from the `pob-mcp` repo rather than the normal PoB shortcut. It:
+1. Sets `POB_API_TCP=1` and `POB_API_TCP_PORT=31337`
+2. Checks whether the TCP patch is still in `Modules/Main.lua`; re-applies it if PoB updated and overwrote it
+3. Launches `Path of Building.exe`
+
+PoB's built-in updater will overwrite `Modules/Main.lua` and show an integrity check warning — this is expected. Re-launching via the batch file self-heals.
+
+---
+
+## Original project
+
+Path of Building was created by David Gowor and is maintained by the Path of Building Community team.
+
+- Upstream repo: [PathOfBuildingCommunity/PathOfBuilding](https://github.com/PathOfBuildingCommunity/PathOfBuilding)
+- License: MIT (see [LICENSE.md](LICENSE.md))
+
+For general PoB usage, documentation, and issues unrelated to the API layer, refer to the upstream project.
