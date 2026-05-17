@@ -195,7 +195,20 @@ end
 handlers.calc_with = function(params)
   local out, base = BuildOps.calc_with(params or {})
   if not out then return { ok = false, error = base } end
-  return { ok = true, output = out }
+  -- Slim down to JSON-safe scalar fields only (full output has functions/userdata)
+  local slim = {
+    CombinedDPS   = out.CombinedDPS,
+    TotalDPS      = out.TotalDPS,
+    AverageDamage = out.AverageDamage,
+    Life          = out.Life,
+    TotalEHP      = out.TotalEHP,
+    EnergyShield  = out.EnergyShield,
+  }
+  local minion = type(out.Minion) == 'table' and out.Minion or nil
+  if minion then
+    slim.Minion = { CombinedDPS = minion.CombinedDPS, TotalDPS = minion.TotalDPS }
+  end
+  return { ok = true, output = slim }
 end
 
 handlers.get_config = function(params)

@@ -250,26 +250,87 @@ end
 
 
 -- Calculate what-if scenario without persisting changes
--- params: { addNodes?: number[], removeNodes?: number[], useFullDPS?: boolean }
+-- params: { addNodes?: number[], removeNodes?: number[], masteryEffects?: {[id]=effectId}, useFullDPS?: boolean }
 function M.calc_with(params)
   if not build or not build.calcsTab then return nil, 'build not initialized' end
-  local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
-  local override = {}
+
+  -- Collect nodes to temporarily add/remove (only unallocated add / allocated remove)
+  local toAdd, toRemove = {}, {}
   if params and type(params.addNodes) == 'table' then
-    override.addNodes = {}
     for _, id in ipairs(params.addNodes) do
-      local n = build.spec and build.spec.nodes and build.spec.nodes[tonumber(id)]
-      if n then override.addNodes[n] = true end
+      local n = build.spec.nodes[tonumber(id)] or build.spec.nodes[tostring(id)]
+      if n and not build.spec.allocNodes[n.id] then table.insert(toAdd, n) end
     end
   end
   if params and type(params.removeNodes) == 'table' then
-    override.removeNodes = {}
     for _, id in ipairs(params.removeNodes) do
-      local n = build.spec and build.spec.nodes and build.spec.nodes[tonumber(id)]
-      if n then override.removeNodes[n] = true end
+      local n = build.spec.nodes[tonumber(id)] or build.spec.nodes[tostring(id)]
+      if n and build.spec.allocNodes[n.id] then table.insert(toRemove, n) end
     end
   end
-  local out = calcFunc(override, params and params.useFullDPS)
+
+  -- Handle mastery effects by temporarily patching node modLists
+  -- (calcs.initEnv reads allocNode.modList directly; it does not handle override.masteryEffects)
+  if params and type(params.masteryEffects) == 'table' and not params.addNodes and not params.removeNodes then
+    local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
+    local spec = build.spec
+    local tree = spec and spec.tree
+    -- Patch each affected mastery node
+    local savedState = {}
+    for k, v in pairs(params.masteryEffects) do
+      local nodeId   = tonumber(k)
+      local effectId = tonumber(v)
+      if nodeId and effectId then
+        local node   = spec.allocNodes and spec.allocNodes[nodeId]
+        local effect = tree and tree.masteryEffects and tree.masteryEffects[effectId]
+        if node and effect then
+          savedState[nodeId] = { sd = node.sd, modList = node.modList }
+          node.sd = effect.sd
+          tree:ProcessStats(node)  -- rebuilds node.modList from new sd
+        end
+      end
+    end
+    local savedViewMode = build.viewMode
+    build.viewMode = "CALCULATOR"
+    local out = calcFunc({}, false)
+    build.viewMode = savedViewMode
+    -- Restore patched nodes
+    for nodeId, saved in pairs(savedState) do
+      local node = spec.allocNodes and spec.allocNodes[nodeId]
+      if node then
+        node.sd      = saved.sd
+        node.modList = saved.modList
+      end
+    end
+    return out, baseOut
+  end
+
+  -- No node changes: return base calc directly (no simulation needed)
+  if #toAdd == 0 and #toRemove == 0 then
+    local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
+    return baseOut, baseOut
+  end
+
+  local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
+  local override = {}
+  if #toAdd > 0 then
+    override.addNodes = {}
+    for _, n in ipairs(toAdd) do override.addNodes[n] = true end
+  end
+  if #toRemove > 0 then
+    override.removeNodes = {}
+    for _, n in ipairs(toRemove) do override.removeNodes[n] = true end
+  end
+  if params and type(params.masteryEffects) == 'table' then
+    override.masteryEffects = params.masteryEffects
+  end
+
+  -- Bypass calcFullDPS which runs unconditionally when viewMode=="TREE",
+  -- making each call 30+ seconds. calcs.perform correctly sets CombinedDPS.
+  local savedViewMode = build.viewMode
+  build.viewMode = "CALCULATOR"
+  local out = calcFunc(override, false)
+  build.viewMode = savedViewMode
   return out, baseOut
 end
 
@@ -961,14 +1022,15 @@ function M.get_mastery_options()
   local spec = build.spec
   local result = {}
   for id, node in pairs(spec.nodes or {}) do
-    if node.isMastery and not node.ascendancyName then
+    if (node.m or node.isMastery) and not node.ascendancyName then
       local options = {}
       for _, effect in ipairs(node.masteryEffects or {}) do
-        local selected = (spec.masterySelections and spec.masterySelections[node.id] == effect.id)
-        table.insert(options, { effectId = effect.id, stats = effect.sd or {}, selected = selected })
+        local eid = effect.effect  -- effect.effect is the numeric ID; effect.id is nil
+        local selected = (spec.masterySelections and spec.masterySelections[node.id] == eid) == true
+        table.insert(options, { effectId = eid, stats = effect.stats or {}, selected = selected })
       end
       if #options > 0 then
-        table.insert(result, { nodeId = id, name = node.name or 'Mastery', options = options })
+        table.insert(result, { nodeId = id, name = node.name or node.dn or 'Mastery', options = options })
       end
     end
   end
