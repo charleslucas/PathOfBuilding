@@ -198,6 +198,14 @@ function M.init(h, port)
   end
 
   start_keepalive()
+  ConPrintf('[PoB API] ========================================')
+  ConPrintf('[PoB API] WARNING: Do NOT click the Update button')
+  ConPrintf('[PoB API]   while Claude is connected -- it will')
+  ConPrintf('[PoB API]   remove the API patch mid-session.')
+  ConPrintf('[PoB API]   To update PoB: close it, relaunch')
+  ConPrintf('[PoB API]   WITHOUT LaunchPoBWithAPI.bat, update,')
+  ConPrintf('[PoB API]   then relaunch WITH it to re-patch.')
+  ConPrintf('[PoB API] ========================================')
   return true
 end
 
@@ -213,9 +221,23 @@ end
 
 -- Track connected client count for console messages
 local client_count = 0
+-- Track update-available state so we warn once when it first appears
+local update_warned = false
 
 function M._pump_inner()
   refresh_build()
+
+  -- Warn in the console the moment PoB detects a pending update,
+  -- so the user sees a clear message before they can click "Update Ready".
+  if not update_warned and _G.launch and launch.updateAvailable
+      and launch.updateAvailable ~= 'none' then
+    update_warned = true
+    ConPrintf('[PoB API] !! UPDATE DETECTED -- DO NOT CLICK "Update Ready" !!')
+    ConPrintf('[PoB API] Clicking it will remove the API patch mid-session')
+    ConPrintf('[PoB API] and break Claude'"'"'s connection until PoB is relaunched.')
+    ConPrintf('[PoB API] To update safely: close PoB, relaunch WITHOUT the batch')
+    ConPrintf('[PoB API] file, apply the update, then relaunch WITH it to re-patch.')
+  end
   -- Accept new connections
   local client, _err = server:accept()
   if client then
