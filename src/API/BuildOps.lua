@@ -32,11 +32,13 @@ function M.export_stats(fields)
     return nil, err
   end
   local wanted = fields or {
+    "TotalDPS", "CombinedDPS", "FullDPS", "MinionTotalDPS",
     "Life", "EnergyShield", "Armour", "Evasion",
     "FireResist", "ColdResist", "LightningResist", "ChaosResist",
     "BlockChance", "SpellBlockChance",
     "LifeRegen", "Mana", "ManaRegen",
     "Ward", "DodgeChance", "SpellDodgeChance",
+    "TotalEHP",
   }
   local result = {}
   for _, k in ipairs(wanted) do
@@ -101,9 +103,18 @@ function M.set_tree(params)
     end
   end
   local mastery = params.masteryEffects or {}
+  -- Bug 1: Preserve existing mastery selections when none are provided by the caller.
+  -- ImportFromNodeList wipes masterySelections before setting them; if the caller omits
+  -- masteryEffects, passing {} would silently clear all mastery choices.
+  if next(mastery) == nil and build.spec.masterySelections then
+    mastery = build.spec.masterySelections
+  end
+  -- Bug 2c: Preserve existing hashOverrides (tattoo/node replacement data).
+  -- Passing {} drops all node overrides that were loaded from the build XML.
+  local hashOverrides = (build.spec.hashOverrides ~= nil) and build.spec.hashOverrides or {}
   local treeVersion = params.treeVersion
   -- Import (resets nodes internally and rebuilds)
-  build.spec:ImportFromNodeList(classId, ascendId, secondaryId, nodes, {}, mastery, treeVersion)
+  build.spec:ImportFromNodeList(classId, ascendId, secondaryId, nodes, hashOverrides, mastery, treeVersion)
   -- Rebuild calcs to reflect changes
   M.get_main_output()
   return true
@@ -243,7 +254,9 @@ function M.update_tree_delta(params)
   local ascendId = params.ascendClassId or current.ascendClassId or 0
   local secId = params.secondaryAscendClassId or current.secondaryAscendClassId or 0
   local tv = params.treeVersion or current.treeVersion
-  build.spec:ImportFromNodeList(tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, nodes, {}, mastery, tv)
+  -- Bug 2c: Preserve existing hashOverrides (tattoo/node overrides loaded from build XML).
+  local hashOverrides = (build.spec.hashOverrides ~= nil) and build.spec.hashOverrides or {}
+  build.spec:ImportFromNodeList(tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, nodes, hashOverrides, mastery, tv)
   M.get_main_output()
   return true
 end
@@ -434,7 +447,11 @@ function M.add_item_text(params)
   if not item or not item.baseName then return nil, 'failed to parse item' end
 
   item:NormaliseQuality()
-  build.itemsTab:AddItem(item, params.noAutoEquip == true)
+  -- Bug 4: When slotName is provided, force noAutoEquip so AddItem does not auto-equip
+  -- to a different slot (e.g. Flask 5 instead of Flask 4). We will explicitly set the
+  -- target slot below.
+  local noAutoEquip = params.noAutoEquip == true or (params.slotName ~= nil)
+  build.itemsTab:AddItem(item, noAutoEquip)
   if params.slotName then
     local slot = tostring(params.slotName)
     if build.itemsTab.slots[slot] then
@@ -446,6 +463,21 @@ function M.add_item_text(params)
   build.buildFlag = true
   M.get_main_output()
   return { id = item.id, name = item.name, slot = params.slotName or item:GetPrimarySlot() }
+end
+
+-- Clear (unequip) an item from a specific slot
+-- params: { slotName: string }
+function M.clear_item_slot(params)
+  if not build or not build.itemsTab then return nil, 'items not initialized' end
+  if type(params) ~= 'table' or type(params.slotName) ~= 'string' then return nil, 'slotName required' end
+  local slot = build.itemsTab.slots[params.slotName]
+  if not slot then return nil, 'slot not found: ' .. params.slotName end
+  slot:SetSelItemId(0)
+  build.itemsTab:PopulateSlots()
+  build.itemsTab:AddUndoState()
+  build.buildFlag = true
+  M.get_main_output()
+  return { slot = params.slotName, cleared = true }
 end
 
 function M.set_flask_active(params)

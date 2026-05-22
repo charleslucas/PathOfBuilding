@@ -146,6 +146,12 @@ handlers.add_item_text = function(params)
   return { ok = true, item = res }
 end
 
+handlers.clear_item_slot = function(params)
+  local res, err = BuildOps.clear_item_slot(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.export_build_xml = function(params)
   local xml, err = BuildOps.export_build_xml()
   if not xml then return { ok = false, error = err } end
