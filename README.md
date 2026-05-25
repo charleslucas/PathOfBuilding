@@ -38,7 +38,7 @@ Both modes share the same `Handlers.lua` / `BuildOps.lua` API surface. See [`src
 ## Launching with the TCP API
 
 Use `LaunchPoBWithAPI.bat` from the `pob-mcp` repo rather than the normal PoB shortcut. It:
-1. Sets `POB_API_TCP=1` and `POB_API_TCP_PORT=31337`
+1. Sets `POB_API_TCP=1` and `POB_API_TCP_PORT=59166`
 2. Checks whether the TCP patch is still in `Modules/Main.lua`; re-applies it if PoB updated and overwrote it
 3. Launches `Path of Building.exe`
 

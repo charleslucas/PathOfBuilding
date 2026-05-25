@@ -2,7 +2,7 @@
 -- Non-blocking TCP JSON-RPC server for live PoB GUI integration.
 --
 -- Enable by launching PoB with: $env:POB_API_TCP = "1"; & "Path of Building.exe"
--- Optional port override: $env:POB_API_TCP_PORT = "31337"
+-- Optional port override: $env:POB_API_TCP_PORT = "59166"
 --
 -- Protocol: same newline-delimited JSON as the stdio server (Handlers.lua).
 -- The server binds to 127.0.0.1 only (loopback — not reachable over LAN).
@@ -173,10 +173,14 @@ end
 
 --- Start listening.
 -- @param h       handlers table from API.Handlers
--- @param port    TCP port (default 31337)
+-- @param port    TCP port (default 59166 = 0xE71E, spells "EXILE" with 7→I in leet)
 function M.init(h, port)
   handlers = h
-  port = tonumber(port) or 31337
+  -- Default 59166 = 0xE71E. Chosen because (a) it's in the IANA dynamic port
+  -- range (49152-65535), so no collision risk with registered services, and
+  -- (b) the hex spells "EXILE" if you read 7 as I — a PoE-themed nod that
+  -- avoids the security-tool baggage of the previous default (31337).
+  port = tonumber(port) or 59166
 
   local err
   server, err = socket.bind('127.0.0.1', port)

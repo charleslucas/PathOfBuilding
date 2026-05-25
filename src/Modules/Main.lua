@@ -278,7 +278,7 @@ the "Releases" section of the GitHub page.]])
 	-- TCP API server: start if POB_API_TCP=1 is set in the environment.
 	-- The server is pumped every frame via onFrameFuncs so it never blocks the GUI.
 	if os.getenv('POB_API_TCP') == '1' then
-		local tcpPort = tonumber(os.getenv('POB_API_TCP_PORT')) or 31337
+		local tcpPort = tonumber(os.getenv('POB_API_TCP_PORT')) or 59166
 		local ok_h, API = pcall(require, 'API.Handlers')
 		if ok_h and API then
 			local ok_t, TcpServer = pcall(require, 'API.TcpServer')
