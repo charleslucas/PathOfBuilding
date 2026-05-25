@@ -234,7 +234,7 @@ function M._pump_inner()
     update_warned = true
     ConPrintf('[PoB API] !! UPDATE DETECTED -- DO NOT CLICK "Update Ready" !!')
     ConPrintf('[PoB API] Clicking it will remove the API patch mid-session')
-    ConPrintf('[PoB API] and break Claude'"'"'s connection until PoB is relaunched.')
+    ConPrintf("[PoB API] and break Claude's connection until PoB is relaunched.")
     ConPrintf('[PoB API] To update safely: close PoB, relaunch WITHOUT the batch')
     ConPrintf('[PoB API] file, apply the update, then relaunch WITH it to re-patch.')
   end
