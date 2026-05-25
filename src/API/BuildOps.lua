@@ -775,6 +775,65 @@ end
 
 -- Search for passive tree nodes by keyword
 -- params: { keyword: string, nodeType?: string ('normal'|'notable'|'keystone'), maxResults?: number, includeAllocated?: boolean }
+-- Return the current state of a single passive node, including any stat
+-- transformations applied by socketed Timeless Jewels (Lethal Pride, etc.).
+-- PoB computes these in PassiveSpec:BuildAllDependsAndPathsFor — by the time
+-- we read node.sd here, it already reflects the transformed text.
+--
+-- Returns a flat structure:
+--   { id, dn, type, allocated, sd, conqueredBy = {seed, conqueror_type} | nil }
+--
+-- dn is the (possibly transformed) display name. sd is the array of
+-- (possibly transformed) stat description lines. conqueredBy is set only when
+-- the node is being transformed by a Timeless Jewel; it indicates which one.
+function M.get_node_state(params)
+  if not build or not build.spec then return nil, 'build/spec not initialized' end
+  if type(params) ~= 'table' then return nil, 'missing params' end
+  local nodeId = params.node_id or params.nodeId
+  if not nodeId then return nil, 'missing node_id' end
+  -- node IDs may arrive as strings; PoB indexes by numeric ID
+  local idNum = tonumber(nodeId)
+  if not idNum then return nil, 'node_id must be numeric' end
+
+  local node = build.spec.nodes and build.spec.nodes[idNum]
+  if not node then return nil, 'node not found: ' .. tostring(nodeId) end
+
+  local allocated = build.spec.allocNodes and build.spec.allocNodes[idNum] ~= nil
+
+  local nType = 'normal'
+  if node.isKeystone then nType = 'keystone'
+  elseif node.isNotable then nType = 'notable'
+  elseif node.isJewelSocket then nType = 'jewel'
+  elseif node.isMultipleChoiceOption then nType = 'mastery'
+  elseif node.ascendancyName then nType = 'ascendancy'
+  end
+
+  -- Copy stat descriptions defensively; PoB may reuse the underlying table.
+  local sd = {}
+  if type(node.sd) == 'table' then
+    for i, line in ipairs(node.sd) do sd[i] = line end
+  end
+
+  local conqueredBy = nil
+  if node.conqueredBy then
+    local cq = node.conqueredBy
+    conqueredBy = {
+      seed = cq.id,
+      conqueror_type = cq.conqueror and cq.conqueror.type or nil,
+    }
+  end
+
+  return {
+    id = idNum,
+    dn = node.dn or node.name,
+    type = nType,
+    allocated = allocated,
+    sd = sd,
+    conqueredBy = conqueredBy,
+    ascendancyName = node.ascendancyName,
+  }
+end
+
 function M.search_nodes(params)
   if not build or not build.spec then return nil, 'build/spec not initialized' end
   if type(params) ~= 'table' or type(params.keyword) ~= 'string' then
