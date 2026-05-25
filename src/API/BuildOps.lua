@@ -783,6 +783,7 @@ function M.search_nodes(params)
 
   local keyword = params.keyword:lower()
   local nodeType = params.nodeType and params.nodeType:lower() or nil
+  if nodeType == "any" or nodeType == "" then nodeType = nil end
   local maxResults = tonumber(params.maxResults) or 50
   local includeAllocated = params.includeAllocated ~= false
 
