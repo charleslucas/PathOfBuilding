@@ -292,6 +292,20 @@ the "Releases" section of the GitHub page.]])
 					if self.controls and self.controls.applyUpdate then
 						self.controls.applyUpdate.shown = function() return false end
 					end
+					-- Suppress the "Update Available" toast that PoB pushes from Main:Tick()
+					-- when launch.updateAvailable is set. Three layers of defense so the
+					-- notification can't sneak through:
+					--   1. clear any pre-set launch.updateAvailable now
+					--   2. stub out launch.CheckForUpdate so it can't be re-set later
+					--   3. preset Main.updateAvailableShown=true so the toast self-skips
+					if _G.launch then
+						_G.launch.updateAvailable = nil
+						if _G.launch.CheckForUpdate then
+							_G.launch._origCheckForUpdate = _G.launch._origCheckForUpdate or _G.launch.CheckForUpdate
+							_G.launch.CheckForUpdate = function() end
+						end
+					end
+					self.updateAvailableShown = true
 				end
 			else
 				ConPrintf('[PoB API] TcpServer unavailable: %s', tostring(TcpServer))
