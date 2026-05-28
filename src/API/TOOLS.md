@@ -38,6 +38,7 @@ pob-mcp calls these actions via the `PoBLuaTcpClient` / `PoBLuaApiClient` bridge
 | Action | Description | Key params |
 |--------|-------------|-----------|
 | `get_stats` | Export selected output stats (life, DPS, resists, etc.) | `fields[]` (optional; defaults to a fixed defensive set) |
+| `get_stat_breakdown` | Tabulate the modifiers contributing to a stat, with source attribution (via `ModStore:Tabulate` on the live `mainEnv` modDB). Returns `{stat, actor, output_value, contributions:[{modType,value,source,name,flags}]}`. Uses a nil config — complete for unconditional stats (life, resists, attributes, armour/ES, regen), incomplete for skill-conditional damage stats. | `stat` (PoB mod name, CamelCase), `actor` (player/minion, default player) |
 
 ---
 

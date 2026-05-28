@@ -834,6 +834,74 @@ function M.get_node_state(params)
   }
 end
 
+-- Tabulate the modifiers contributing to a given stat, with source
+-- attribution. Uses the live calc env's player (or minion) modDB and
+-- ModStore:Tabulate to enumerate each contributing modifier's value, type
+-- (BASE/INC/MORE/OVERRIDE/FLAG), and source ("Tree:nodeId", item name, etc).
+--
+-- Accuracy note: a nil config is used, so only UNCONDITIONAL modifiers are
+-- captured. This is complete for defensive/attribute stats (Life, resists,
+-- Strength, Armour, EnergyShield, regen, etc.) but INCOMPLETE for damage and
+-- other skill-conditional stats, where mods depend on the active skill's
+-- config. The caller is told this so it can scope expectations.
+function M.get_stat_breakdown(params)
+  if not build or not build.calcsTab then return nil, 'build not initialized' end
+  if type(params) ~= 'table' then return nil, 'missing params' end
+  local statName = params.stat or params.name
+  if type(statName) ~= 'string' or statName == '' then
+    return nil, 'missing stat name'
+  end
+
+  if build.calcsTab.BuildOutput then
+    pcall(build.calcsTab.BuildOutput, build.calcsTab)
+  end
+  local env = build.calcsTab.mainEnv
+  if not env then return nil, 'no calc env available' end
+
+  local actorName = (params.actor == 'minion') and 'minion' or 'player'
+  local actor = env[actorName]
+  if not actor or not actor.modDB then
+    return nil, 'no modDB for actor ' .. actorName
+  end
+  local modDB = actor.modDB
+
+  local contributions = {}
+  local modTypes = { 'BASE', 'INC', 'MORE', 'OVERRIDE', 'FLAG' }
+  for _, modType in ipairs(modTypes) do
+    local ok, tab = pcall(function() return modDB:Tabulate(modType, nil, statName) end)
+    if ok and type(tab) == 'table' then
+      for _, entry in ipairs(tab) do
+        local mod = entry.mod
+        local v = entry.value
+        -- Keep only JSON-safe scalar values; skip table-valued (LIST) mods.
+        local vt = type(v)
+        if vt == 'number' or vt == 'boolean' or vt == 'string' then
+          table.insert(contributions, {
+            modType = modType,
+            value = v,
+            source = (mod and mod.source) or '?',
+            name = (mod and mod.name) or statName,
+            flags = (mod and mod.flags) or 0,
+          })
+        end
+      end
+    end
+  end
+
+  local output = build.calcsTab.mainOutput
+  local outVal = nil
+  if output and type(output[statName]) ~= 'nil' then
+    outVal = output[statName]
+  end
+
+  return {
+    stat = statName,
+    actor = actorName,
+    output_value = outVal,
+    contributions = contributions,
+  }
+end
+
 function M.search_nodes(params)
   if not build or not build.spec then return nil, 'build/spec not initialized' end
   if type(params) ~= 'table' or type(params.keyword) ~= 'string' then
