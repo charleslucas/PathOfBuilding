@@ -860,15 +860,35 @@ function M.get_stat_breakdown(params)
 
   local actorName = (params.actor == 'minion') and 'minion' or 'player'
   local actor = env[actorName]
-  if not actor or not actor.modDB then
-    return nil, 'no modDB for actor ' .. actorName
+  if not actor then return nil, 'no actor ' .. actorName end
+
+  -- Choose the modifier store + config:
+  --   default            -> actor.modDB with nil cfg (unconditional mods only)
+  --   use_skill_config    -> the MAIN skill's skillModList + skillCfg, which
+  --                          captures skill-conditional mods (damage, speed,
+  --                          crit, etc.) for that specific skill.
+  local store, cfg, configMode, configNote
+  if params.use_skill_config then
+    local skill = actor.mainSkill
+    if not skill or not skill.skillModList or not skill.skillCfg then
+      return nil, 'no main skill / skill config available for actor ' .. actorName
+    end
+    store = skill.skillModList
+    cfg = skill.skillCfg
+    configMode = 'skill'
+    local ge = skill.activeEffect and skill.activeEffect.grantedEffect
+    configNote = ge and ge.name or 'main skill'
+  else
+    store = actor.modDB
+    cfg = nil
+    configMode = 'global'
+    if not store then return nil, 'no modDB for actor ' .. actorName end
   end
-  local modDB = actor.modDB
 
   local contributions = {}
   local modTypes = { 'BASE', 'INC', 'MORE', 'OVERRIDE', 'FLAG' }
   for _, modType in ipairs(modTypes) do
-    local ok, tab = pcall(function() return modDB:Tabulate(modType, nil, statName) end)
+    local ok, tab = pcall(function() return store:Tabulate(modType, cfg, statName) end)
     if ok and type(tab) == 'table' then
       for _, entry in ipairs(tab) do
         local mod = entry.mod
@@ -888,6 +908,12 @@ function M.get_stat_breakdown(params)
     end
   end
 
+  -- Aggregate inc-sum / more-product for this mod name (the inc-vs-more
+  -- diagnosis). Single mod name only — not the full damage stat set.
+  local incSum, moreProduct
+  pcall(function() incSum = store:Sum('INC', cfg, statName) end)
+  pcall(function() moreProduct = store:More(cfg, statName) end)
+
   local output = build.calcsTab.mainOutput
   local outVal = nil
   if output and type(output[statName]) ~= 'nil' then
@@ -897,8 +923,159 @@ function M.get_stat_breakdown(params)
   return {
     stat = statName,
     actor = actorName,
+    config = configMode,
+    config_note = configNote,
     output_value = outVal,
+    inc_sum = incSum,
+    more_multiplier = moreProduct,
     contributions = contributions,
+  }
+end
+
+-- Strip PoB console color codes (^7, ^xRRGGBB) from a display string.
+local function stripColorCodes(s)
+  if type(s) ~= 'string' then return s end
+  s = s:gsub('%^[xX]%x%x%x%x%x%x', '')
+  s = s:gsub('%^%d', '')
+  return s
+end
+
+-- Keys that hold heavy object refs / potential cycles — never recurse into them.
+local BREAKDOWN_SKIP_KEYS = {
+  item = true, modList = true, cfg = true, actor = true, env = true,
+  skill = true, mainSkill = true, parent = true, mod = true,
+}
+
+-- Flatten one of PoB's heterogeneous breakdown entries into display text
+-- lines. Handles: plain strings, nested string arrays, `.label`, `.slots`
+-- (per-source rows), `.rowList`/`.colList` (table displays), and generic
+-- scalar named fields. Skips heavy object refs. Depth-guarded.
+local function flattenBreakdown(entry, lines, indent, depth)
+  depth = depth or 0
+  indent = indent or ''
+  if depth > 6 then return end
+  local t = type(entry)
+  if t == 'string' then
+    local s = stripColorCodes(entry)
+    if s and s:gsub('%s', '') ~= '' then table.insert(lines, indent .. s) end
+    return
+  elseif t == 'number' or t == 'boolean' then
+    table.insert(lines, indent .. tostring(entry))
+    return
+  elseif t ~= 'table' then
+    return
+  end
+
+  if type(entry.label) == 'string' then
+    table.insert(lines, indent .. stripColorCodes(entry.label))
+  end
+
+  -- array part (the common multiplier-chain lines)
+  for _, v in ipairs(entry) do
+    flattenBreakdown(v, lines, indent, depth + 1)
+  end
+
+  -- per-source slot rows
+  if type(entry.slots) == 'table' then
+    for _, slot in ipairs(entry.slots) do
+      if type(slot) == 'table' then
+        local src = stripColorCodes(tostring(slot.sourceName or slot.source or '?'))
+        local parts = { indent .. '  ' .. src .. ':' }
+        if slot.base ~= nil then table.insert(parts, ' base ' .. tostring(slot.base)) end
+        if slot.inc then table.insert(parts, stripColorCodes(tostring(slot.inc))) end
+        if slot.more then table.insert(parts, stripColorCodes(tostring(slot.more))) end
+        if slot.total ~= nil then table.insert(parts, ' = ' .. stripColorCodes(tostring(slot.total))) end
+        table.insert(lines, table.concat(parts))
+      end
+    end
+  end
+
+  -- table display (rowList + colList)
+  if type(entry.rowList) == 'table' and type(entry.colList) == 'table' then
+    local cols = {}
+    for _, col in ipairs(entry.colList) do
+      if type(col) == 'table' and col.key then table.insert(cols, col) end
+    end
+    for _, row in ipairs(entry.rowList) do
+      if type(row) == 'table' then
+        local cells = {}
+        for _, col in ipairs(cols) do
+          local val = row[col.key]
+          if val ~= nil then
+            local label = col.label and stripColorCodes(tostring(col.label)) or col.key
+            table.insert(cells, label .. '=' .. stripColorCodes(tostring(val)))
+          end
+        end
+        if #cells > 0 then table.insert(lines, indent .. '  ' .. table.concat(cells, '  ')) end
+      end
+    end
+  end
+
+  -- generic scalar named fields not handled above (surfaces unexpected shapes)
+  for k, v in pairs(entry) do
+    if type(k) == 'string' and not BREAKDOWN_SKIP_KEYS[k]
+       and k ~= 'label' and k ~= 'slots' and k ~= 'rowList' and k ~= 'colList' then
+      local vt = type(v)
+      if vt == 'string' then
+        local s = stripColorCodes(v)
+        if s and s:gsub('%s', '') ~= '' then table.insert(lines, indent .. k .. ': ' .. s) end
+      elseif vt == 'number' or vt == 'boolean' then
+        table.insert(lines, indent .. k .. ': ' .. tostring(v))
+      end
+    end
+  end
+end
+
+-- Surface PoB's own computed breakdown for an output stat (the multiplier
+-- chain shown on the Calcs tab): base -> added -> conversion -> increased ->
+-- more -> crit -> ailment, etc. Reads the CALCS-mode env that PoB already
+-- builds and keeps (build.calcsTab.calcsEnv) — no extra calc run, and no math
+-- re-derived on our side; we just flatten PoB's display structure to text.
+function M.get_calc_breakdown(params)
+  if not build or not build.calcsTab then return nil, 'build not initialized' end
+  if type(params) ~= 'table' then params = {} end
+
+  if build.calcsTab.BuildOutput then
+    pcall(build.calcsTab.BuildOutput, build.calcsTab)
+  end
+  local env = build.calcsTab.calcsEnv
+  if not env then return nil, 'no CALCS env available (breakdowns require CALCS mode)' end
+  local actorName = (params.actor == 'minion') and 'minion' or 'player'
+  local actor = env[actorName]
+  if not actor then return nil, 'no actor ' .. actorName end
+  local bd = actor.breakdown
+  if type(bd) ~= 'table' then return nil, 'no breakdown table for actor ' .. actorName end
+
+  -- enumerate available breakdown keys (stats that currently have one)
+  local available = {}
+  for k, v in pairs(bd) do
+    if type(k) == 'string' then table.insert(available, k) end
+  end
+  table.sort(available)
+
+  local statName = params.stat or params.name
+  if type(statName) ~= 'string' or statName == '' then
+    return { available = available }
+  end
+
+  local entry = bd[statName]
+  if entry == nil then
+    return { stat = statName, found = false, available = available }
+  end
+
+  local lines = {}
+  flattenBreakdown(entry, lines, '', 0)
+
+  local output = build.calcsTab.calcsOutput or {}
+  local outVal = nil
+  if type(output[statName]) ~= 'nil' then outVal = output[statName] end
+
+  return {
+    stat = statName,
+    found = true,
+    actor = actorName,
+    output_value = outVal,
+    lines = lines,
   }
 end
 

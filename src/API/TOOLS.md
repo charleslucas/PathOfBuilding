@@ -38,7 +38,8 @@ pob-mcp calls these actions via the `PoBLuaTcpClient` / `PoBLuaApiClient` bridge
 | Action | Description | Key params |
 |--------|-------------|-----------|
 | `get_stats` | Export selected output stats (life, DPS, resists, etc.) | `fields[]` (optional; defaults to a fixed defensive set) |
-| `get_stat_breakdown` | Tabulate the modifiers contributing to a stat, with source attribution (via `ModStore:Tabulate` on the live `mainEnv` modDB). Returns `{stat, actor, output_value, contributions:[{modType,value,source,name,flags}]}`. Uses a nil config — complete for unconditional stats (life, resists, attributes, armour/ES, regen), incomplete for skill-conditional damage stats. | `stat` (PoB mod name, CamelCase), `actor` (player/minion, default player) |
+| `get_stat_breakdown` | Tabulate the modifiers contributing to a stat, with source attribution (via `ModStore:Tabulate`). Returns `{stat, actor, config, config_note, output_value, inc_sum, more_multiplier, contributions:[{modType,value,source,name,flags}]}`. Default uses `mainEnv` player modDB + nil cfg (unconditional stats). With `use_skill_config=true` it uses the MAIN skill's `skillModList` + `skillCfg`, capturing skill-conditional mods (damage/speed/crit). | `stat` (PoB mod name, CamelCase), `actor` (player/minion), `use_skill_config` (bool) |
+| `get_calc_breakdown` | Surface PoB's own computed breakdown for an output stat — the Calcs-tab multiplier chain (base→added→conversion→inc→more→crit→ailment). Reads the CALCS-mode env PoB already keeps (`calcsTab.calcsEnv.player.breakdown[stat]`); no calc re-run, no math re-derived — flattens PoB's display structure to text lines (color codes stripped, `.slots`/`.rowList` handled). Returns `{stat, found, actor, output_value, lines[]}`, or `{available[]}` when no/unknown stat is given. | `stat` (PoB output-stat key; omit to list available), `actor` |
 
 ---
 
