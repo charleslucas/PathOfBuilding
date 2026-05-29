@@ -1046,10 +1046,15 @@ function M.get_calc_breakdown(params)
   local bd = actor.breakdown
   if type(bd) ~= 'table' then return nil, 'no breakdown table for actor ' .. actorName end
 
-  -- enumerate available breakdown keys (stats that currently have one)
+  -- enumerate available breakdown keys (stats that currently have one).
+  -- Skip function values: PoB stores its breakdown.* helper builders (mod,
+  -- slot, simple, multiChain, area, dot, critDot, effMult, leech) on the
+  -- same table — those are not stat breakdowns.
   local available = {}
   for k, v in pairs(bd) do
-    if type(k) == 'string' then table.insert(available, k) end
+    if type(k) == 'string' and type(v) ~= 'function' then
+      table.insert(available, k)
+    end
   end
   table.sort(available)
 
