@@ -242,13 +242,17 @@ local power_kicked   = false  -- true once we've kicked recalc for this connecti
 function M._pump_inner()
   refresh_build()
 
-  -- Kick node power recalc once per connection as soon as a build is loaded,
-  -- and detect completion each frame.
+  -- Kick node power recalc once per connection as soon as a build is loaded.
+  -- Then drive the coroutine ourselves each frame — PoB only calls BuildPower()
+  -- from tree tab rendering, so it won't run in the background otherwise.
   if _G.build and build.calcsTab then
     if client_count > 0 and not power_kicked then
       power_kicked = true
       build.calcsTab.powerBuildFlag = true
       ConPrintf('[PoB API] Node power recalculation started (on connect)')
+    end
+    if build.calcsTab.powerBuilder or build.calcsTab.powerBuildFlag then
+      build.calcsTab:BuildPower()
     end
     local is_building = build.calcsTab.powerBuilder ~= nil
                      or build.calcsTab.powerBuildFlag == true
