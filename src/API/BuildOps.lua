@@ -1382,24 +1382,46 @@ function M.create_item_set(params)
     newId = newId + 1
   end
 
+  -- Use PoB's own NewItemSet so all slot entries are properly initialised.
+  -- copyTable skipped the sync between live slot.selItemId and the stored
+  -- itemSet data, producing an effectively-empty copy.
   local newSet
-  if params and params.copyFrom and sets[params.copyFrom] then
-    -- Deep-copy the source set (copies all slot selItemId entries)
-    newSet = copyTable(sets[params.copyFrom])
-    newSet.id = newId
-    newSet.title = params.title or ((newSet.title or ('Item Set ' .. tostring(params.copyFrom))) .. ' (copy)')
+  if it.NewItemSet then
+    newSet = it:NewItemSet(newId)  -- registers in it.itemSets[newId], zeroes all slots
   else
-    -- Blank set: initialise all non-node slots to empty
-    newSet = { id = newId, title = (params and params.title) or ('Item Set ' .. tostring(newId)) }
+    newSet = { id = newId }
     for slotName, slot in pairs(it.slots or {}) do
       if not slot.nodeId then
         newSet[slotName] = { selItemId = 0 }
       end
     end
+    sets[newId] = newSet
   end
 
-  sets[newId] = newSet
-  it.itemSets = sets
+  newSet.title = (params and params.title) or ('Item Set ' .. tostring(newId))
+
+  -- Copy slot assignments from source set if requested.
+  if params and params.copyFrom and sets[params.copyFrom] then
+    local srcSet = sets[params.copyFrom]
+    local isActiveSrc = (params.copyFrom == it.activeItemSetId)
+    for slotName, slot in pairs(it.slots or {}) do
+      if not slot.nodeId and newSet[slotName] then
+        if isActiveSrc then
+          -- For the active set, live slot values are authoritative
+          newSet[slotName].selItemId = slot.selItemId
+          newSet[slotName].active = slot.active
+        elseif srcSet[slotName] then
+          newSet[slotName].selItemId = srcSet[slotName].selItemId
+          newSet[slotName].active = srcSet[slotName].active
+        end
+      end
+    end
+    if not (params and params.title) then
+      local srcTitle = srcSet.title or ('Item Set ' .. tostring(params.copyFrom))
+      newSet.title = srcTitle .. ' (copy)'
+    end
+  end
+
   table.insert(order, newId)
   it.itemSetOrderList = order
 
