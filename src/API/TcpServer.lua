@@ -235,9 +235,21 @@ end
 local client_count = 0
 -- Track update-available state so we warn once when it first appears
 local update_warned = false
+-- Track node power coroutine state to detect completion
+local power_building = false
 
 function M._pump_inner()
   refresh_build()
+
+  -- Detect node power coroutine completion and log it.
+  if _G.build and build.calcsTab then
+    local is_building = build.calcsTab.powerBuilder ~= nil
+                     or build.calcsTab.powerBuildFlag == true
+    if power_building and not is_building then
+      ConPrintf('[PoB API] Node power recalculation complete')
+    end
+    power_building = is_building
+  end
 
   -- Warn in the console the moment PoB detects a pending update,
   -- so the user sees a clear message before they can click "Update Ready".
@@ -261,6 +273,7 @@ function M._pump_inner()
     -- Kick node-power computation so data is ready when get_node_power is called
     if _G.build and build.calcsTab then
       build.calcsTab.powerBuildFlag = true
+      ConPrintf('[PoB API] Node power recalculation started (on connect)')
     end
   end
 

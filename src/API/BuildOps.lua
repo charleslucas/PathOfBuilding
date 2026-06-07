@@ -1738,14 +1738,17 @@ function M.get_node_power(params)
     build.calcsTab.powerBuildFlag = true
     if not _G.main then
       -- Headless: no frame loop, so pump the coroutine to completion.
+      ConPrintf('[PoB API] Node power recalculation started (headless)')
       local safety = 0
       repeat
         build.calcsTab:BuildPower()
         safety = safety + 1
       until (not build.calcsTab.powerBuilder) or safety > 5000
+      ConPrintf('[PoB API] Node power recalculation complete')
     else
       -- TCP: kick the coroutine into existence with a small inline pump so
       -- partial data is available immediately; frame loop finishes the rest.
+      ConPrintf('[PoB API] Node power recalculation started (via get_node_power)')
       for _ = 1, 10 do
         build.calcsTab:BuildPower()
         if not build.calcsTab.powerBuilder then break end
