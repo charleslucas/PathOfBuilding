@@ -1734,10 +1734,17 @@ function M.get_node_power(params)
   local limit    = params.limit    or 20
   local doRecalc = params.recalculate == true
 
-  -- Set the flag so PoB's frame loop computes power on next frames.
-  -- (Blocking the coroutine synchronously here would time out the TCP handler.)
   if doRecalc then
     build.calcsTab.powerBuildFlag = true
+    if not _G.main then
+      -- Headless: no frame loop, so pump the coroutine synchronously.
+      local safety = 0
+      repeat
+        build.calcsTab:BuildPower()
+        safety = safety + 1
+      until (not build.calcsTab.powerBuilder) or safety > 5000
+    end
+    -- TCP: frame loop pumps it naturally; just setting the flag is enough.
   end
 
   local spec    = build.spec
