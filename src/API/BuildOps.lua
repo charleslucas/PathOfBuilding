@@ -1737,14 +1737,20 @@ function M.get_node_power(params)
   if doRecalc then
     build.calcsTab.powerBuildFlag = true
     if not _G.main then
-      -- Headless: no frame loop, so pump the coroutine synchronously.
+      -- Headless: no frame loop, so pump the coroutine to completion.
       local safety = 0
       repeat
         build.calcsTab:BuildPower()
         safety = safety + 1
       until (not build.calcsTab.powerBuilder) or safety > 5000
+    else
+      -- TCP: kick the coroutine into existence with a small inline pump so
+      -- partial data is available immediately; frame loop finishes the rest.
+      for _ = 1, 10 do
+        build.calcsTab:BuildPower()
+        if not build.calcsTab.powerBuilder then break end
+      end
     end
-    -- TCP: frame loop pumps it naturally; just setting the flag is enough.
   end
 
   local spec    = build.spec
@@ -1842,15 +1848,19 @@ function M.get_node_power(params)
     out[i] = results[i]
   end
 
+  local recalcPending = build.calcsTab.powerBuildFlag == true
+                     or build.calcsTab.powerBuilder ~= nil
+
   return {
-    nodes     = out,
-    total     = #results,
-    has_data  = #results > 0,
-    mode      = mode,
-    filter    = filter,
-    power_max = {
-      offence = powerMax.offence  or 0,
-      defence = powerMax.defence  or 0,
+    nodes         = out,
+    total         = #results,
+    has_data      = #results > 0,
+    recalc_pending = recalcPending,
+    mode          = mode,
+    filter        = filter,
+    power_max     = {
+      offence = powerMax.offence or 0,
+      defence = powerMax.defence or 0,
     },
   }
 end
