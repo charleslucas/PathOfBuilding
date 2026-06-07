@@ -1748,7 +1748,7 @@ function M.get_node_power(params)
     else
       -- TCP: kick the coroutine into existence with a small inline pump so
       -- partial data is available immediately; frame loop finishes the rest.
-      ConPrintf('[PoB API] Node power recalculation started (via get_node_power)')
+      -- (TcpServer.lua detects the start/complete transitions and logs them.)
       for _ = 1, 10 do
         build.calcsTab:BuildPower()
         if not build.calcsTab.powerBuilder then break end

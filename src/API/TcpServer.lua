@@ -249,13 +249,15 @@ function M._pump_inner()
     if client_count > 0 and not power_kicked then
       power_kicked = true
       build.calcsTab.powerBuildFlag = true
-      ConPrintf('[PoB API] Node power recalculation started (on connect)')
     end
     if build.calcsTab.powerBuilder or build.calcsTab.powerBuildFlag then
       build.calcsTab:BuildPower()
     end
     local is_building = build.calcsTab.powerBuilder ~= nil
                      or build.calcsTab.powerBuildFlag == true
+    if not power_building and is_building then
+      ConPrintf('[PoB API] Node power recalculation started')
+    end
     if power_building and not is_building then
       ConPrintf('[PoB API] Node power recalculation complete')
     end
