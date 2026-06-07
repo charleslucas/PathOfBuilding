@@ -390,6 +390,25 @@ function M.get_skills()
         end
       end
     end
+    local gems = {}
+    if g.gemList then
+      for gemIdx, gem in ipairs(g.gemList) do
+        local isSupport = false
+        if gem.gemData and gem.gemData.grantedEffect then
+          isSupport = gem.gemData.grantedEffect.support == true
+        elseif gem.nameSpec then
+          isSupport = gem.nameSpec:match(" Support$") ~= nil
+        end
+        table.insert(gems, {
+          index = gemIdx,
+          name = gem.nameSpec or '?',
+          level = gem.level or 1,
+          quality = gem.quality or 0,
+          enabled = gem.enabled ~= false,
+          is_support = isSupport,
+        })
+      end
+    end
     table.insert(groups, {
       index = idx,
       label = g.label,
@@ -398,6 +417,7 @@ function M.get_skills()
       includeInFullDPS = g.includeInFullDPS,
       mainActiveSkill = g.mainActiveSkill,
       skills = names,
+      gems = gems,
     })
   end
   local result = {
