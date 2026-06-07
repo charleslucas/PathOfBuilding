@@ -1354,6 +1354,53 @@ function M.select_item_set(id)
   return get_itemset_list()
 end
 
+function M.create_item_set(params)
+  if not build or not build.itemsTab then return nil, 'build not initialized' end
+  local it = build.itemsTab
+  local sets = it.itemSets or {}
+  local order = it.itemSetOrderList or {}
+
+  -- Generate a unique numeric ID
+  local newId = 1
+  while sets[newId] do
+    newId = newId + 1
+  end
+
+  local newSet
+  if params and params.copyFrom and sets[params.copyFrom] then
+    -- Deep-copy the source set (copies all slot selItemId entries)
+    newSet = copyTable(sets[params.copyFrom])
+    newSet.id = newId
+    newSet.title = params.title or ((newSet.title or ('Item Set ' .. tostring(params.copyFrom))) .. ' (copy)')
+  else
+    -- Blank set: initialise all non-node slots to empty
+    newSet = { id = newId, title = (params and params.title) or ('Item Set ' .. tostring(newId)) }
+    for slotName, slot in pairs(it.slots or {}) do
+      if not slot.nodeId then
+        newSet[slotName] = { selItemId = 0 }
+      end
+    end
+  end
+
+  sets[newId] = newSet
+  it.itemSets = sets
+  table.insert(order, newId)
+  it.itemSetOrderList = order
+
+  if params and params.activate then
+    if it.SetActiveItemSet then
+      it:SetActiveItemSet(newId)
+    else
+      it.activeItemSetId = newId
+      it.activeItemSet = newSet
+    end
+  end
+
+  build.buildFlag = true
+  M.get_main_output()
+  return get_itemset_list()
+end
+
 
 -- ============================================================
 -- Mastery options

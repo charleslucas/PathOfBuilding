@@ -359,6 +359,12 @@ handlers.select_item_set = function(params)
   return { ok = true, result = res }
 end
 
+handlers.create_item_set = function(params)
+  local res, err = BuildOps.create_item_set(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.get_mastery_options = function(params)
   local res, err = BuildOps.get_mastery_options()
   if not res then return { ok = false, error = err } end
