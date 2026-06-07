@@ -1719,4 +1719,138 @@ function M.set_notes(params)
   return { ok = true }
 end
 
+-- ============================================================
+-- Node Power
+-- ============================================================
+
+function M.get_node_power(params)
+  if not build or not build.spec or not build.calcsTab then
+    return nil, 'build not initialized'
+  end
+  params = params or {}
+  local mode     = params.mode     or 'combined'
+  local filter   = params.filter   or 'unallocated'
+  local maxDepth = params.max_depth   -- nil = no depth limit
+  local limit    = params.limit    or 20
+  local doRecalc = params.recalculate == true
+
+  -- Optionally run PowerBuilder to completion before reading data.
+  if doRecalc then
+    build.calcsTab.powerBuildFlag = true
+    -- Pump the coroutine until it finishes (BuildPower() resumes it once per call).
+    local safety = 0
+    repeat
+      build.calcsTab:BuildPower()
+      safety = safety + 1
+    until (not build.calcsTab.powerBuilder) or safety > 5000
+  end
+
+  local spec    = build.spec
+  local powerMax = build.calcsTab.powerMax or {}
+
+  -- BFS from allocated nodes to compute hop-distance for each reachable node.
+  local nodeDistance = nil
+  if maxDepth then
+    nodeDistance = {}
+    local queue = {}
+    local qOut, qIn = 1, 1
+
+    for _, node in pairs(spec.allocNodes or {}) do
+      nodeDistance[node.id] = 0
+      for _, linked in ipairs(node.linked or {}) do
+        if not nodeDistance[linked.id] then
+          nodeDistance[linked.id] = 1
+          queue[qIn] = { node = linked, dist = 1 }
+          qIn = qIn + 1
+        end
+      end
+    end
+
+    while qOut < qIn do
+      local entry = queue[qOut]
+      qOut = qOut + 1
+      local n    = entry.node
+      local dist = entry.dist
+      if dist < maxDepth then
+        for _, linked in ipairs(n.linked or {}) do
+          if not nodeDistance[linked.id]
+            and n.type ~= 'Mastery'
+            and linked.type ~= 'ClassStart'
+            and linked.type ~= 'AscendClassStart'
+          then
+            nodeDistance[linked.id] = dist + 1
+            queue[qIn] = { node = linked, dist = dist + 1 }
+            qIn = qIn + 1
+          end
+        end
+      end
+    end
+  end
+
+  -- Collect qualifying nodes.
+  local results = {}
+  for nodeId, node in pairs(spec.nodes or {}) do
+    local isAlloc = spec.allocNodes[nodeId] ~= nil
+
+    -- Allocation filter
+    if filter == 'unallocated' and isAlloc then
+    elseif filter == 'allocated' and not isAlloc then
+    else
+      -- Depth filter
+      local depthOk = true
+      local depth = nil
+      if maxDepth then
+        depth = nodeDistance and nodeDistance[nodeId]
+        if not depth or depth > maxDepth then depthOk = false end
+      end
+
+      if depthOk then
+        local power = node.power
+        if power then
+          local off  = power.offence or 0
+          local def  = power.defence or 0
+          if off ~= 0 or def ~= 0 then
+            table.insert(results, {
+              id       = nodeId,
+              name     = node.name or '?',
+              type     = node.type or 'Normal',
+              allocated = isAlloc,
+              offence  = off,
+              defence  = def,
+              combined = off + def,
+              depth    = depth,
+            })
+          end
+        end
+      end
+    end
+  end
+
+  -- Sort
+  table.sort(results, function(a, b)
+    if mode == 'offence' then return a.offence > b.offence
+    elseif mode == 'defence' then return a.defence > b.defence
+    else return a.combined > b.combined
+    end
+  end)
+
+  -- Apply limit
+  local out = {}
+  for i = 1, math.min(limit, #results) do
+    out[i] = results[i]
+  end
+
+  return {
+    nodes     = out,
+    total     = #results,
+    has_data  = #results > 0,
+    mode      = mode,
+    filter    = filter,
+    power_max = {
+      offence = powerMax.offence  or 0,
+      defence = powerMax.defence  or 0,
+    },
+  }
+end
+
 return M

@@ -284,6 +284,12 @@ handlers.get_node_state = function(params)
   return { ok = true, node = res }
 end
 
+handlers.get_node_power = function(params)
+  local res, err = BuildOps.get_node_power(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.get_stat_breakdown = function(params)
   local res, err = BuildOps.get_stat_breakdown(params or {})
   if not res then return { ok = false, error = err } end
