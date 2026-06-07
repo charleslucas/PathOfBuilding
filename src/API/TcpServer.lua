@@ -258,6 +258,10 @@ function M._pump_inner()
     client_count = client_count + 1
     table.insert(clients, { sock = client, buf = '' })
     ConPrintf('[PoB API] Claude connected (%d client(s) active)', client_count)
+    -- Kick node-power computation so data is ready when get_node_power is called
+    if _G.build and build.calcsTab then
+      build.calcsTab.powerBuildFlag = true
+    end
   end
 
   -- Service connected clients

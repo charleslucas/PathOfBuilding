@@ -1734,15 +1734,10 @@ function M.get_node_power(params)
   local limit    = params.limit    or 20
   local doRecalc = params.recalculate == true
 
-  -- Optionally run PowerBuilder to completion before reading data.
+  -- Set the flag so PoB's frame loop computes power on next frames.
+  -- (Blocking the coroutine synchronously here would time out the TCP handler.)
   if doRecalc then
     build.calcsTab.powerBuildFlag = true
-    -- Pump the coroutine until it finishes (BuildPower() resumes it once per call).
-    local safety = 0
-    repeat
-      build.calcsTab:BuildPower()
-      safety = safety + 1
-    until (not build.calcsTab.powerBuilder) or safety > 5000
   end
 
   local spec    = build.spec
