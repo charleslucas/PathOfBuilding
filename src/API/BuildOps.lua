@@ -393,12 +393,8 @@ function M.get_skills()
     local gems = {}
     if g.gemList then
       for gemIdx, gem in ipairs(g.gemList) do
-        local isSupport = false
-        if gem.gemData and gem.gemData.grantedEffect then
-          isSupport = gem.gemData.grantedEffect.support == true
-        elseif gem.nameSpec then
-          isSupport = gem.nameSpec:match(" Support$") ~= nil
-        end
+        local grantedEffect = gem.grantedEffect or (gem.gemData and gem.gemData.grantedEffect)
+        local isSupport = grantedEffect ~= nil and grantedEffect.support == true
         table.insert(gems, {
           index = gemIdx,
           name = gem.nameSpec or '?',
