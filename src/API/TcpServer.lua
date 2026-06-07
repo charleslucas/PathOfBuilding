@@ -248,7 +248,11 @@ function M._pump_inner()
   if _G.build and build.calcsTab then
     if client_count > 0 and not power_kicked then
       power_kicked = true
-      build.calcsTab.powerBuildFlag = true
+      local pm = build.calcsTab.powerMax
+      local hasData = pm and ((pm.offence or 0) > 0 or (pm.defence or 0) > 0)
+      if not hasData then
+        build.calcsTab.powerBuildFlag = true
+      end
     end
     if build.calcsTab.powerBuilder or build.calcsTab.powerBuildFlag then
       build.calcsTab:BuildPower()
