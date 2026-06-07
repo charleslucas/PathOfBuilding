@@ -235,14 +235,21 @@ end
 local client_count = 0
 -- Track update-available state so we warn once when it first appears
 local update_warned = false
--- Track node power coroutine state to detect completion
+-- Track node power coroutine state to detect completion and avoid double-kick
 local power_building = false
+local power_kicked   = false  -- true once we've kicked recalc for this connection
 
 function M._pump_inner()
   refresh_build()
 
-  -- Detect node power coroutine completion and log it.
+  -- Kick node power recalc once per connection as soon as a build is loaded,
+  -- and detect completion each frame.
   if _G.build and build.calcsTab then
+    if client_count > 0 and not power_kicked then
+      power_kicked = true
+      build.calcsTab.powerBuildFlag = true
+      ConPrintf('[PoB API] Node power recalculation started (on connect)')
+    end
     local is_building = build.calcsTab.powerBuilder ~= nil
                      or build.calcsTab.powerBuildFlag == true
     if power_building and not is_building then
@@ -270,11 +277,7 @@ function M._pump_inner()
     client_count = client_count + 1
     table.insert(clients, { sock = client, buf = '' })
     ConPrintf('[PoB API] Claude connected (%d client(s) active)', client_count)
-    -- Kick node-power computation so data is ready when get_node_power is called
-    if _G.build and build.calcsTab then
-      build.calcsTab.powerBuildFlag = true
-      ConPrintf('[PoB API] Node power recalculation started (on connect)')
-    end
+    power_kicked = false  -- reset so we kick once the build is ready
   end
 
   -- Service connected clients
@@ -340,6 +343,7 @@ function M._pump_inner()
     else
       client_count = math.max(0, client_count - 1)
       ConPrintf('[PoB API] Claude disconnected (%d client(s) active)', client_count)
+      if client_count == 0 then power_kicked = false end
     end
   end
   clients = alive
