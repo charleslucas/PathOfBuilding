@@ -110,6 +110,19 @@ function ModStoreClass:ReplaceMod(...)
 	end
 end
 
+---ConvertMod
+---  Converts an existing mod to a new name, replacing it in the store.
+---  Finds a mod matching oldName with the same type, flags, keywordFlags, and source as the new mod.
+---  If no matching mod exists, the new mod is added instead.
+---@param oldName string @The name of the existing mod to convert
+---@param ... any @Parameters to be passed along to the modLib.createMod function (new name, type, value, source, ...)
+function ModStoreClass:ConvertMod(oldName, ...)
+	local mod = mod_createMod(...)
+	if not self:ConvertModInternal(oldName, mod) then
+		self:AddMod(mod)
+	end
+end
+
 function ModStoreClass:Combine(modType, cfg, ...)
 	if modType == "MORE" then
 		return self:More(cfg, ...)
@@ -207,6 +220,17 @@ function ModStoreClass:Max(cfg, ...)
 	return max		
 end
 
+function ModStoreClass:Min(cfg, ...)
+	local min
+	for _, value in ipairs(self:Tabulate("MIN", cfg, ...)) do
+		local val = self:EvalMod(value.mod, cfg)
+		if min == nil or val < min then
+			min = val
+		end	
+	end
+	return min
+end
+
 ---HasMod
 ---  Checks if a mod exists with the given properties.
 ---  Useful for determining if the other aggregate functions will find
@@ -235,26 +259,48 @@ function ModStoreClass:GetMultiplier(var, cfg, noMod)
 end
 
 function ModStoreClass:GetStat(stat, cfg)
+	-- Checks if any buff in buffList matches
+	-- Was needed for skills that provide multiple buffs (e.g. Herald of Agony) and can't be accesses with `buffList[1]`
+	local function isNameInBuffList(buffList, name)
+		for _, buff in ipairs(buffList) do
+			if buff.name == name then return true end
+		end
+		return false
+	end
 	if stat == "ManaReservedPercent" then
 		local reservedPercentMana = 0
 		-- Check if mana is 0 (i.e. from Blood Magic) to avoid division by 0.
 		local totalMana = self.actor.output["Mana"]
 		if totalMana == 0 then return 0 else
 			for _, activeSkill in ipairs(self.actor.activeSkillList) do
-				if (activeSkill.skillTypes[SkillType.Aura] and not activeSkill.skillFlags.disable and activeSkill.buffList and activeSkill.buffList[1] and activeSkill.buffList[1].name == cfg.skillName) then
+				if (activeSkill.skillTypes[SkillType.HasReservation] and not activeSkill.skillFlags.disable and activeSkill.buffList and activeSkill.buffList[1] and cfg and (isNameInBuffList(activeSkill.buffList, cfg.skillName) or isNameInBuffList(activeSkill.buffList, cfg.summonSkillName)) ) then
 					local manaBase = activeSkill.skillData["ManaReservedBase"] or 0
-					reservedPercentMana = manaBase / totalMana * 100
+					reservedPercentMana = m_floor(manaBase / totalMana * 100)
 					break
 				end
 			end
 			return m_min(reservedPercentMana, 100) --Don't let people get more than 100% reservation for aura effect.
 		end
 	end
+	if stat == "LifeReservedPercent" then
+		local reservedPercentLife = 0
+		local totalLife = self.actor.output["Life"]
+		if totalLife == 0 then return 0 else
+			for _, activeSkill in ipairs(self.actor.activeSkillList) do
+				if (activeSkill.skillTypes[SkillType.HasReservation] and not activeSkill.skillFlags.disable and activeSkill.buffList and activeSkill.buffList[1] and cfg and (isNameInBuffList(activeSkill.buffList, cfg.skillName) or isNameInBuffList(activeSkill.buffList, cfg.summonSkillName)) ) then
+					local lifeBase = activeSkill.skillData["LifeReservedBase"] or 0
+					reservedPercentLife = m_floor(lifeBase / totalLife * 100)
+					break
+				end
+			end
+			return m_min(reservedPercentLife, 100) --Don't let people get more than 100% reservation for aura effect.
+		end
+	end
 	-- if ReservationEfficiency is -100, ManaUnreserved is nan which breaks everything if Arcane Cloak is enabled
 	if stat == "ManaUnreserved" and self.actor.output[stat] ~= self.actor.output[stat] then
 		-- 0% reserved = total mana
 		return self.actor.output["Mana"]
-	elseif stat == "ManaUnreserved" and not self.actor.output[stat] == nil and self.actor.output[stat] < 0 then
+	elseif stat == "ManaUnreserved" and self.actor.output[stat] ~= nil and self.actor.output[stat] < 0 then
 		-- This reverse engineers how much mana is unreserved before efficiency for accurate Arcane Cloak calcs
 		local reservedPercentBeforeEfficiency = (math.abs(self.actor.output["ManaUnreservedPercent"]) + 100) * ((100 + self.actor["ManaEfficiency"]) / 100)
 		return self.actor.output["Mana"] * (math.ceil(reservedPercentBeforeEfficiency) / 100);
@@ -609,7 +655,7 @@ function ModStoreClass:EvalMod(mod, cfg, globalLimits)
 			end
 			if tag.searchCond then
 				for slot, item in pairs(items) do
-					if (not tag.allSlots or tag.allSlots and item.type ~= "Jewel") and slot ~= itemSlot or not tag.excludeSelf then
+					if (not tag.allSlots or tag.allSlots and (item.type ~= "Jewel" and item.type ~= "Graft")) and slot ~= itemSlot or not tag.excludeSelf then
 						t_insert(matches, item:FindModifierSubstring(tag.searchCond:lower(), slot:lower()))
 					end
 				end

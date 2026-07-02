@@ -117,7 +117,9 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 				classId = classId,
 				class = class,
 				ascendClassId = ascendClassId,
-				ascendClass = ascendClass
+				ascendClass = ascendClass,
+				flavourText = ascendClass.flavourText,
+				flavourTextRect = ascendClass.flavourTextRect,
 			}
 		end
 	end
@@ -179,7 +181,9 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 				classId = "alternate_ascendancies",
 				class = alternate_ascendancies_class,
 				ascendClassId = ascendClassId,
-				ascendClass = ascendClass
+				ascendClass = ascendClass,
+				flavourText = ascendClass.flavourText,
+				flavourTextRect = ascendClass.flavourTextRect,
 			}
 			self.secondaryAscendNameMap[ascendClass.id] = self.ascendNameMap[ascendClass.id]
 		end
@@ -521,22 +525,25 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 				end
 			else
 				self.ascendancyMap[node.dn:lower()] = node
-				if not self.classNotables[self.ascendNameMap[node.ascendancyName].class.name] then
-					self.classNotables[self.ascendNameMap[node.ascendancyName].class.name] = { }
+				local className = self.ascendNameMap[node.ascendancyName].class.name
+				if not self.classNotables[className] then
+					self.classNotables[className] = { }
 				end
-				if self.ascendNameMap[node.ascendancyName].class.name ~= "Scion" then
-					t_insert(self.classNotables[self.ascendNameMap[node.ascendancyName].class.name], node.dn)
+				if className ~= "Scion" then
+					t_insert(self.classNotables[className], node.dn)
 				end
 			end
 		else
 			node.type = "Normal"
-			if node.ascendancyName == "Ascendant" and not node.dn:find("Dexterity") and not node.dn:find("Intelligence") and
-				not node.dn:find("Strength") and not node.dn:find("Passive") then
+			if ((node.ascendancyName == "Ascendant" and not node.isMultipleChoiceOption and not node.dn:find("Dexterity")
+				and not node.dn:find("Intelligence") and not node.dn:find("Strength") and not node.dn:find("Passive"))
+				or (node.isMultipleChoiceOption and node.ascendancyName)) and node.ascendancyName ~= "Reliquarian" then
+				local className = self.ascendNameMap[node.ascendancyName].class.name
 				self.ascendancyMap[node.dn:lower()] = node
-				if not self.classNotables[self.ascendNameMap[node.ascendancyName].class.name] then
-					self.classNotables[self.ascendNameMap[node.ascendancyName].class.name] = { }
+				if not self.classNotables[className] then
+					self.classNotables[className] = { }
 				end
-				t_insert(self.classNotables[self.ascendNameMap[node.ascendancyName].class.name], node.dn)
+				t_insert(self.classNotables[className], node.dn)
 			end
 		end
 
@@ -699,6 +706,12 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 			--error("missing sprite "..node.icon)
 			node.sprites = { }
 		end
+
+		-- create id to dn map for calcs breakdown sourcing
+		if not self.tattoo.idMap then
+			self.tattoo.idMap = { }
+		end
+		self.tattoo.idMap[node.id] = node.dn
 
 		self:ProcessStats(node)
 	end

@@ -69,7 +69,7 @@ return {
 	["Sirus Meteor"] = {
 		DamageType = "Spell",
 		DamageMultipliers = {
-			Physical = { 45.087560245599, 0.22541711316695 }
+			Physical = { 28.179207951973, 0.14090638379039 }
 		},
 		UberDamageMultiplier = 1.52,
 		speed = 1500,
@@ -143,7 +143,7 @@ return {
 	["Maven Memory Game"] = {
 		DamageType = "Spell",
 		DamageMultipliers = {
-			Physical = { 104.29090544842, 0.52145452724208 }
+			Physical = { 26.072726362104, 0.13036363181052 }
 		},
 		UberDamageMultiplier = 1.0086206896552,
 		speed = 7500,

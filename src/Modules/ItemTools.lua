@@ -115,6 +115,9 @@ function itemLib.applyRange(line, range, valueScalar)
 	if numbers == 0 and line:match("(%d+%.?%d*)%%? ") then --If a mod contains x or x% and is not already a ranged value, then only the first number will be scalable as any following numbers will always be conditions or unscalable values.
 		numbers = 1
 	end
+	if numbers == 1 and line:match("Adds (%d+) to (%d+) (%w+) Damage") then -- any flat added damage that does not have a range on the first value (e.g. low level flat to attacks, hybrid lightning dmg, Prismweave lightning) needs to scale the second value if present
+		numbers = 2
+	end
 
 	return itemLib.applyValueScalar(line, valueScalar, numbers, precision)
 end
@@ -132,7 +135,7 @@ function itemLib.formatModLine(modLine, dbMode)
 			line = line .. "   ^1'" .. modLine.extra .. "'"
 		end
 	else
-		colorCode = (modLine.crafted and colorCodes.CRAFTED) or (modLine.scourge and colorCodes.SCOURGE) or (modLine.custom and colorCodes.CUSTOM) or (modLine.fractured and colorCodes.FRACTURED) or (modLine.crucible and colorCodes.CRUCIBLE) or colorCodes.MAGIC
+		colorCode = (modLine.crafted and colorCodes.CRAFTED) or (modLine.mutated and colorCodes.MUTATED) or (modLine.scourge and colorCodes.SCOURGE) or (modLine.custom and colorCodes.CUSTOM) or (modLine.fractured and colorCodes.FRACTURED) or (modLine.crucible and colorCodes.CRUCIBLE) or colorCodes.MAGIC
 	end
 	return colorCode..line
 end

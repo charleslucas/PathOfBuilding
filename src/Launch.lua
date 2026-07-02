@@ -110,6 +110,10 @@ function launch:OnFrame()
 		if self.main.OnFrame then
 			local errMsg = PCall(self.main.OnFrame, self.main)
 			if errMsg then
+				-- Send user to build list menu if a build crashes on initial load
+				if self.main.modes.BUILD.outputRevision == 1 and self.main.modes.BUILD.buildFlag and not self.devMode then
+					main:SetMode("LIST")
+				end
 				self:ShowErrMsg("In 'OnFrame': %s", errMsg)
 			end
 		end
@@ -122,7 +126,7 @@ function launch:OnFrame()
 		self:DrawPopup(r, g, b, "^0%s", self.promptMsg)
 	end
 	if self.doRestart then
-		local screenW, screenH = GetScreenSize()
+		local screenW, screenH = GetVirtualScreenSize()
 		SetDrawColor(0, 0, 0, 0.75)
 		DrawImage(nil, 0, 0, screenW, screenH)
 		SetDrawColor(1, 1, 1)
@@ -250,11 +254,11 @@ end
 ---Download the given page in the background, and calls the provided callback function when done:
 ---@param url string
 ---@param callback fun(response:table, errMsg:string) @ response = { header, body }
----@param params table @ params = { header, body }
+---@param params? table @ params = { header, body }
 function launch:DownloadPage(url, callback, params)
 	params = params or {}
 	local script = [[
-		local url, requestHeader, requestBody, connectionProtocol, proxyURL = ...
+		local url, requestHeader, requestBody, connectionProtocol, proxyURL, noSSL = ...
 		local responseHeader = ""
 		local responseBody = ""
 		ConPrintf("Downloading page at: %s", url)
@@ -281,6 +285,10 @@ function launch:DownloadPage(url, callback, params)
 		if proxyURL then
 			easy:setopt(curl.OPT_PROXY, proxyURL)
 		end
+		if noSSL then
+			easy:setopt(curl.OPT_SSL_VERIFYPEER, 0)
+			easy:setopt(curl.OPT_SSL_VERIFYHOST, 0)
+		end
 		easy:setopt_headerfunction(function(data)
 			responseHeader = responseHeader .. data
 			return true
@@ -303,7 +311,7 @@ function launch:DownloadPage(url, callback, params)
 		ConPrintf("Download complete. Status: %s", errMsg or "OK")
 		return responseBody, errMsg, responseHeader
 	]]
-	local id = LaunchSubScript(script, "", "ConPrintf", url, params.header, params.body, self.connectionProtocol, self.proxyURL)
+	local id = LaunchSubScript(script, "", "ConPrintf", url, params.header, params.body, self.connectionProtocol, self.proxyURL, self.noSSL or false)
 	if id then
 		self.subScripts[id] = {
 			type = "DOWNLOAD",
@@ -383,7 +391,7 @@ function launch:RunPromptFunc(key)
 end
 
 function launch:DrawPopup(r, g, b, fmt, ...)
-	local screenW, screenH = GetScreenSize()
+	local screenW, screenH = GetVirtualScreenSize()
 	SetDrawColor(0, 0, 0, 0.5)
 	DrawImage(nil, 0, 0, screenW, screenH)
 	local txt = string.format(fmt, ...)

@@ -195,7 +195,7 @@ function main:Init()
 		end
 	}
 
-	self.controls.clearOutput = new("ButtonControl", nil, {1190, 10, 100, 18}, "Clear", function()
+	self.controls.clearOutput = new("ButtonControl", nil, {1230, 10, 100, 18}, "Clear", function()
 		wipeTable(self.scriptOutput)
 	end) {
 		shown = function()
@@ -415,7 +415,7 @@ function main:Shutdown()
 end
 
 function main:OnFrame()
-	self.screenW, self.screenH = GetScreenSize()
+	self.screenW, self.screenH = GetVirtualScreenSize()
 
 	self.viewPort = { x = 0, y = 0, width = self.screenW, height = self.screenH }
 
