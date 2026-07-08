@@ -389,6 +389,18 @@ handlers.set_gem_enabled = function(params)
   return { ok = true }
 end
 
+handlers.get_full_dps_breakdown = function()
+  local res, err = BuildOps.get_full_dps_breakdown()
+  if not res then return { ok = false, error = err } end
+  return {
+    ok         = true,
+    skills     = res.skills,
+    fullDPS    = res.fullDPS,
+    fullDotDPS = res.fullDotDPS,
+    playerDPS  = res.playerDPS,
+  }
+end
+
 handlers.probe_stat_weights = function(params)
   local res, err = BuildOps.probe_stat_weights(params or {})
   if not res then return { ok = false, error = err } end

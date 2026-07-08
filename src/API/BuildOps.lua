@@ -1667,13 +1667,15 @@ function M.probe_stat_weights(params)
 
   -- Baseline runs the UNCHANGED carrier through the same replacement path, so
   -- clone/normalisation artifacts cancel out of every delta.
-  local baseDPS, baseEHP = 0, 0
+  local baseDPS, baseEHP, baseMinionDPS, baseFullDPS = 0, 0, 0, 0
   local okBase, baseErr = pcall(function()
     local baseItem = new('Item', rawText)
     if not baseItem or not baseItem.baseName then error('failed to re-parse carrier item') end
     local out = calcFunc({ repSlotName = repSlot, repItem = baseItem })
     baseDPS = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
     baseEHP = out and (out.TotalEHP or 0) or 0
+    baseMinionDPS = out and (out.MinionCombinedDPS or out.MinionTotalDPS or 0) or 0
+    baseFullDPS = out and (out.FullDPS or 0) or 0
   end)
   if not okBase then
     build.viewMode = savedViewMode
@@ -1690,20 +1692,24 @@ function M.probe_stat_weights(params)
         local out = calcFunc({ repSlotName = repSlot, repItem = probeItem })
         local dps = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
         local ehp = out and (out.TotalEHP or 0) or 0
+        local mdps = out and (out.MinionCombinedDPS or out.MinionTotalDPS or 0) or 0
+        local fdps = out and (out.FullDPS or 0) or 0
         -- Distinguish "no effect on this build" from "PoB didn't understand
         -- the mod line": an unrecognized line parses with .extra set.
         local lines = probeItem.explicitModLines or {}
         local last = lines[#lines]
         local recognized = (#lines > originalModCount) and last ~= nil and (last.extra == nil)
-        return { dps = dps, ehp = ehp, recognized = recognized }
+        return { dps = dps, ehp = ehp, mdps = mdps, fdps = fdps, recognized = recognized }
       end)
       if ok and res then
         evaluated = evaluated + 1
         table.insert(results, {
-          mod        = modLine,
-          dpsDelta   = res.dps - baseDPS,
-          ehpDelta   = res.ehp - baseEHP,
-          recognized = res.recognized,
+          mod            = modLine,
+          dpsDelta       = res.dps - baseDPS,
+          ehpDelta       = res.ehp - baseEHP,
+          minionDpsDelta = res.mdps - baseMinionDPS,
+          fullDpsDelta   = res.fdps - baseFullDPS,
+          recognized     = res.recognized,
         })
       else
         failed = failed + 1
@@ -1718,12 +1724,42 @@ function M.probe_stat_weights(params)
   build.viewMode = savedViewMode
 
   return {
-    base      = { CombinedDPS = baseDPS, TotalEHP = baseEHP },
+    base      = { CombinedDPS = baseDPS, TotalEHP = baseEHP, MinionCombinedDPS = baseMinionDPS, FullDPS = baseFullDPS },
     slot      = slotName,
     carrier   = item.name or item.baseName or slotName,
     results   = results,
     evaluated = evaluated,
     failed    = failed,
+  }
+end
+
+-- Full DPS per-skill breakdown — reads PoB's already-cached MAIN output.
+-- calcs.buildOutput unconditionally computes calcFullDPS and stores the
+-- per-skill list on mainOutput.SkillDPS ({name, dps, count, trigger,
+-- skillPart, source}); dps is PER-INSTANCE (per single minion), count is the
+-- socket group's manually-set "Count" field. FREE: no recompute, no mutation.
+function M.get_full_dps_breakdown()
+  if not build or not build.calcsTab then return nil, 'build not initialized' end
+  local output, err = M.get_main_output()
+  if not output then return nil, err end
+
+  local skills = {}
+  for _, s in ipairs(output.SkillDPS or {}) do
+    table.insert(skills, {
+      name      = s.name,
+      dps       = tonumber(s.dps) or 0,
+      count     = tonumber(s.count) or 1,
+      trigger   = s.trigger,
+      skillPart = s.skillPart,
+      source    = s.source,
+    })
+  end
+
+  return {
+    skills     = skills,
+    fullDPS    = tonumber(output.FullDPS) or 0,
+    fullDotDPS = tonumber(output.FullDotDPS) or 0,
+    playerDPS  = tonumber(output.CombinedDPS or output.TotalDPS) or 0,
   }
 end
 
