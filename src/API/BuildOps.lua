@@ -1644,7 +1644,11 @@ function M.probe_stat_weights(params)
     if not item then return nil, 'no equipped item found to carry probe mods; pass slot explicitly' end
   end
 
-  local slotType = item.base and item.base.type or slotName
+  -- repSlotName is matched against the SLOT NAME (CalcSetup.lua:
+  -- `slotName == override.repSlotName`) — "Ring 1", not base type "Ring".
+  -- (evaluate_anoint_candidates gets away with base.type only because the
+  -- Amulet/Belt slot names happen to equal their base types.)
+  local repSlot = slotName
   local rawText
   if item.BuildRaw then
     local okRaw, r = pcall(function() return item:BuildRaw() end)
@@ -1667,7 +1671,7 @@ function M.probe_stat_weights(params)
   local okBase, baseErr = pcall(function()
     local baseItem = new('Item', rawText)
     if not baseItem or not baseItem.baseName then error('failed to re-parse carrier item') end
-    local out = calcFunc({ repSlotName = slotType, repItem = baseItem })
+    local out = calcFunc({ repSlotName = repSlot, repItem = baseItem })
     baseDPS = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
     baseEHP = out and (out.TotalEHP or 0) or 0
   end)
@@ -1683,7 +1687,7 @@ function M.probe_stat_weights(params)
       local ok, res = pcall(function()
         local probeItem = new('Item', rawText .. '\n' .. modLine)
         if not probeItem or not probeItem.baseName then error('probe item parse failed') end
-        local out = calcFunc({ repSlotName = slotType, repItem = probeItem })
+        local out = calcFunc({ repSlotName = repSlot, repItem = probeItem })
         local dps = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
         local ehp = out and (out.TotalEHP or 0) or 0
         -- Distinguish "no effect on this build" from "PoB didn't understand
