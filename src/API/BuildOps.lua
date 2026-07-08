@@ -1613,6 +1613,116 @@ function M.evaluate_anoint_candidates(params)
   }
 end
 
+-- Probe the build's sensitivity to individual stat mods WITHOUT mutating it.
+-- For each probe mod line, clones the item in a carrier slot, appends the mod,
+-- and evaluates through the non-mutating GetMiscCalculator closure (same
+-- pattern as evaluate_anoint_candidates: no AddItem, no undo state, no
+-- buildFlag — nothing the user sees changes).
+-- params: { slot?: string, mods: string[] }
+function M.probe_stat_weights(params)
+  if not build or not build.itemsTab or not build.calcsTab then return nil, 'build not initialized' end
+  local mods = params and params.mods
+  if type(mods) ~= 'table' or #mods == 0 then return nil, 'mods list required' end
+  if #mods > 40 then return nil, 'too many probe mods (max 40)' end
+
+  -- Pick a carrier slot: probe mods are appended to a clone of this slot's item.
+  local activeItemSet = build.itemsTab.activeItemSet
+  local function itemIn(name)
+    local entry = activeItemSet and activeItemSet[name]
+    return entry and build.itemsTab.items[entry.selItemId]
+  end
+  local slotName = params and params.slot
+  local item
+  if slotName then
+    item = itemIn(slotName)
+    if not item then return nil, 'no item equipped in slot: ' .. slotName end
+  else
+    for _, cand in ipairs({ 'Ring 1', 'Ring 2', 'Amulet', 'Belt', 'Helmet', 'Boots', 'Gloves' }) do
+      item = itemIn(cand)
+      if item then slotName = cand; break end
+    end
+    if not item then return nil, 'no equipped item found to carry probe mods; pass slot explicitly' end
+  end
+
+  local slotType = item.base and item.base.type or slotName
+  local rawText
+  if item.BuildRaw then
+    local okRaw, r = pcall(function() return item:BuildRaw() end)
+    if okRaw and type(r) == 'string' and #r > 0 then rawText = r end
+  end
+  rawText = rawText or item.raw
+  if type(rawText) ~= 'string' or #rawText == 0 then return nil, 'could not serialize carrier item' end
+  local originalModCount = #(item.explicitModLines or {})
+
+  local calcFunc = build.calcsTab:GetMiscCalculator()
+  if not calcFunc then return nil, 'failed to get calc function' end
+
+  -- Bypass calcFullDPS (see calc_with): keeps each probe call fast.
+  local savedViewMode = build.viewMode
+  build.viewMode = 'CALCULATOR'
+
+  -- Baseline runs the UNCHANGED carrier through the same replacement path, so
+  -- clone/normalisation artifacts cancel out of every delta.
+  local baseDPS, baseEHP = 0, 0
+  local okBase, baseErr = pcall(function()
+    local baseItem = new('Item', rawText)
+    if not baseItem or not baseItem.baseName then error('failed to re-parse carrier item') end
+    local out = calcFunc({ repSlotName = slotType, repItem = baseItem })
+    baseDPS = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
+    baseEHP = out and (out.TotalEHP or 0) or 0
+  end)
+  if not okBase then
+    build.viewMode = savedViewMode
+    return nil, 'baseline calc failed: ' .. tostring(baseErr)
+  end
+
+  local results = {}
+  local evaluated, failed = 0, 0
+  for _, modLine in ipairs(mods) do
+    if type(modLine) == 'string' and #modLine > 0 and #modLine < 200 then
+      local ok, res = pcall(function()
+        local probeItem = new('Item', rawText .. '\n' .. modLine)
+        if not probeItem or not probeItem.baseName then error('probe item parse failed') end
+        local out = calcFunc({ repSlotName = slotType, repItem = probeItem })
+        local dps = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
+        local ehp = out and (out.TotalEHP or 0) or 0
+        -- Distinguish "no effect on this build" from "PoB didn't understand
+        -- the mod line": an unrecognized line parses with .extra set.
+        local lines = probeItem.explicitModLines or {}
+        local last = lines[#lines]
+        local recognized = (#lines > originalModCount) and last ~= nil and (last.extra == nil)
+        return { dps = dps, ehp = ehp, recognized = recognized }
+      end)
+      if ok and res then
+        evaluated = evaluated + 1
+        table.insert(results, {
+          mod        = modLine,
+          dpsDelta   = res.dps - baseDPS,
+          ehpDelta   = res.ehp - baseEHP,
+          recognized = res.recognized,
+        })
+      else
+        failed = failed + 1
+        table.insert(results, { mod = modLine, error = tostring(res) })
+      end
+    else
+      failed = failed + 1
+      table.insert(results, { mod = tostring(modLine), error = 'invalid mod line' })
+    end
+  end
+
+  build.viewMode = savedViewMode
+
+  return {
+    base      = { CombinedDPS = baseDPS, TotalEHP = baseEHP },
+    slot      = slotName,
+    carrier   = item.name or item.baseName or slotName,
+    results   = results,
+    evaluated = evaluated,
+    failed    = failed,
+  }
+end
+
 
 -- ============================================================
 -- Weighted trade query generation (mirrors PoB's Find Upgrade)

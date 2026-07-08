@@ -389,6 +389,20 @@ handlers.set_gem_enabled = function(params)
   return { ok = true }
 end
 
+handlers.probe_stat_weights = function(params)
+  local res, err = BuildOps.probe_stat_weights(params or {})
+  if not res then return { ok = false, error = err } end
+  return {
+    ok        = true,
+    base      = res.base,
+    slot      = res.slot,
+    carrier   = res.carrier,
+    results   = res.results,
+    evaluated = res.evaluated,
+    failed    = res.failed,
+  }
+end
+
 handlers.evaluate_anoint_candidates = function(params)
   local res, err = BuildOps.evaluate_anoint_candidates(params or {})
   if not res then return { ok = false, error = err } end
