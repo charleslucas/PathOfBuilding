@@ -2030,4 +2030,121 @@ function M.get_node_power(params)
   }
 end
 
+-- Get static gem data straight from PoB's own game data (no build required).
+-- Reuses PoB's renderers (calcLib.buildSkillInstanceStats + data.describeStats), so the
+-- output matches the in-game gem tooltip exactly. Works with no character loaded.
+-- params: { gemName: string, levels?: number[] }
+-- Returns: { name, baseTypeName, tags, support, castTime, description, variants[],
+--            maxLevel, perLevel:[{level, levelRequirement, reqStr, reqDex, reqInt,
+--            critChance, damageEffectiveness, cost, statLines[]}], qualityLines[] }
+function M.get_gem_detail(params)
+  if type(params) ~= 'table' then return nil, 'invalid params' end
+  local gemName = params.gemName and tostring(params.gemName) or nil
+  if not gemName or gemName == '' then return nil, 'missing gemName' end
+  if not data or not data.gems then return nil, 'game data not loaded' end
+
+  -- Resolve gem: base-name index first (handles "Fireball"), then a full-name scan
+  -- (handles "Vaal Fireball" and transfigured "Firestorm of Meteors").
+  local gemId = data.gemForBaseName[gemName:lower()]
+  if not gemId then
+    local target = gemName:lower()
+    for id, gem in pairs(data.gems) do
+      local nm = gem.name and gem.name:lower()
+      local bt = gem.baseTypeName and gem.baseTypeName:lower()
+      if nm == target or bt == target then gemId = id; break end
+    end
+  end
+  if not gemId then return nil, 'gem not found: ' .. gemName end
+
+  local gem = data.gems[gemId]
+  local grantedEffect = gem.grantedEffect
+  if not grantedEffect then return nil, 'gem has no granted effect: ' .. gemName end
+
+  -- Sibling variants sharing this base (base / Vaal / transfigured), by gameId
+  local variants = {}
+  if gem.gameId and data.gemsByGameId and data.gemsByGameId[gem.gameId] then
+    for _, v in pairs(data.gemsByGameId[gem.gameId]) do
+      if v.name then table.insert(variants, v.name) end
+    end
+    table.sort(variants)
+  end
+
+  local maxLevel = #grantedEffect.levels
+
+  -- Level selection: caller-supplied, else 1 / mid / max (mirrors the current output).
+  local levels = {}
+  if type(params.levels) == 'table' and #params.levels > 0 then
+    for _, n in ipairs(params.levels) do
+      local v = tonumber(n)
+      if v and v >= 1 and v <= maxLevel then table.insert(levels, v) end
+    end
+  else
+    if maxLevel >= 1 then table.insert(levels, 1) end
+    if maxLevel >= 10 then table.insert(levels, math.min(10, maxLevel - 1)) end
+    if maxLevel > 1 then table.insert(levels, maxLevel) end
+  end
+
+  -- Format a level's resource cost the same way GemSelectControl does.
+  local function formatCost(levelData)
+    if not levelData.cost or not data.costs then return nil end
+    local parts = nil
+    for _, res in ipairs(data.costs) do
+      local v = levelData.cost[res.Resource]
+      if v then
+        local str = res.ResourceString:gsub('{0}', string.format('%g', math.floor(v / res.Divisor * 100 + 0.5) / 100))
+        parts = (parts and (parts .. ', ') or '') .. str
+      end
+    end
+    return parts
+  end
+
+  local perLevel = {}
+  for _, n in ipairs(levels) do
+    local levelData = grantedEffect.levels[n] or {}
+    local inst = { level = n, quality = 0, gemData = gem, actorLevel = levelData.levelRequirement }
+    local stats = calcLib.buildSkillInstanceStats(inst, grantedEffect)
+    local statLines = {}
+    if data.describeStats and grantedEffect.statDescriptionScope then
+      local descriptions = data.describeStats(stats, grantedEffect.statDescriptionScope)
+      for _, line in ipairs(descriptions) do table.insert(statLines, line) end
+    end
+    local reqLevel = levelData.levelRequirement or 1
+    table.insert(perLevel, {
+      level               = n,
+      levelRequirement    = reqLevel,
+      reqStr              = calcLib.getGemStatRequirement(reqLevel, grantedEffect.support, gem.reqStr or 0),
+      reqDex              = calcLib.getGemStatRequirement(reqLevel, grantedEffect.support, gem.reqDex or 0),
+      reqInt              = calcLib.getGemStatRequirement(reqLevel, grantedEffect.support, gem.reqInt or 0),
+      critChance          = levelData.critChance,
+      damageEffectiveness = levelData.damageEffectiveness and (levelData.damageEffectiveness * 100) or nil,
+      cost                = formatCost(levelData),
+      statLines           = statLines,
+    })
+  end
+
+  -- Quality bonus, rendered at +20% (matches SkillsTab quality preview).
+  local qualityLines = {}
+  if grantedEffect.qualityStats and data.describeStats and grantedEffect.statDescriptionScope then
+    local qstats = {}
+    for _, stat in ipairs(grantedEffect.qualityStats) do
+      qstats[stat[1]] = (qstats[stat[1]] or 0) + math.floor(stat[2] * 20)
+    end
+    local qdesc = data.describeStats(qstats, grantedEffect.statDescriptionScope)
+    for _, line in ipairs(qdesc) do table.insert(qualityLines, line) end
+  end
+
+  return {
+    name         = gem.name,
+    baseTypeName = gem.baseTypeName,
+    tags         = gem.tagString,
+    support      = grantedEffect.support and true or false,
+    castTime     = grantedEffect.castTime,
+    description  = grantedEffect.description,
+    variants     = variants,
+    maxLevel     = maxLevel,
+    perLevel     = perLevel,
+    qualityLines = qualityLines,
+  }
+end
+
 return M

@@ -191,6 +191,12 @@ handlers.get_build_info = function(params)
   return { ok = true, info = info }
 end
 
+handlers.get_gem_detail = function(params)
+  local gem, err = BuildOps.get_gem_detail(params or {})
+  if not gem then return { ok = false, error = err } end
+  return { ok = true, gem = gem }
+end
+
 handlers.update_tree_delta = function(params)
   local ok2, err = BuildOps.update_tree_delta(params or {})
   if not ok2 then return { ok = false, error = err } end
