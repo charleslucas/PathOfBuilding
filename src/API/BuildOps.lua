@@ -1281,20 +1281,21 @@ function M.create_spec(params)
   if not build or not build.treeTab then return nil, 'build not initialized' end
   local tt = build.treeTab
   local specs = tt.specList or {}
-  -- Clone from an existing spec or create empty
+  -- Build a REAL PassiveSpec via PoB's own constructor + copy pattern (TreeTab.lua:599-602),
+  -- NOT a hand-fabricated table. A plain table omits fields a genuine spec has (jewels, nodes,
+  -- allocNodes, hashOverrides, ...); native code that iterates every spec then crashes — e.g.
+  -- ItemsTab:DeleteItem does pairs(spec.jewels) during import's clear-items step and throws on
+  -- a fake spec, corrupting the import (root-caused 2026-07-09).
   local newSpec
   if params and params.copyFrom and specs[params.copyFrom] then
-    -- Deep copy the source spec's nodes/masteries; reuse same spec object structure
     local src = specs[params.copyFrom]
-    newSpec = { treeVersion = src.treeVersion, curClassId = src.curClassId, curAscendClassId = src.curAscendClassId,
-                curClassName = src.curClassName, curAscendClassName = src.curAscendClassName,
-                allocNodes = {}, masterySelections = {}, title = params.title or (src.title .. ' (copy)') }
-    for id, v in pairs(src.allocNodes or {}) do newSpec.allocNodes[id] = v end
-    for id, v in pairs(src.masterySelections or {}) do newSpec.masterySelections[id] = v end
+    newSpec = new("PassiveSpec", build, src.treeVersion)
+    newSpec.title = params.title or ((src.title or 'Default') .. ' (copy)')
+    newSpec.jewels = copyTable(src.jewels)
+    newSpec:RestoreUndoState(src:CreateUndoState(), src.treeVersion)
   else
-    newSpec = { treeVersion = latestTreeVersion, curClassId = 0, curAscendClassId = 0,
-                curClassName = 'Scion', curAscendClassName = 'None',
-                allocNodes = {}, masterySelections = {}, title = params and params.title or ('Spec ' .. tostring(#specs + 1)) }
+    newSpec = new("PassiveSpec", build, latestTreeVersion)
+    newSpec.title = (params and params.title) or ('Spec ' .. tostring(#specs + 1))
   end
   table.insert(specs, newSpec)
   tt.specList = specs
