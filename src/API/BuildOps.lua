@@ -380,8 +380,32 @@ function M.set_config(params)
   build.configTab.input = input
   local changed = false
   if params.bandit ~= nil then input.bandit = tostring(params.bandit); changed = true end
-  if params.pantheonMajorGod ~= nil then input.pantheonMajorGod = tostring(params.pantheonMajorGod); changed = true end
-  if params.pantheonMinorGod ~= nil then input.pantheonMinorGod = tostring(params.pantheonMinorGod); changed = true end
+  -- Pantheon values MUST be a valid id from data.pantheons (or "None"). An invalid value
+  -- poisons the build: CalcSetup.lua skips the lookup only for exactly "None", so any other
+  -- unknown value makes data.pantheons[v] = nil and PantheonTools.applySoulMod(nil) crash-loops
+  -- every frame (blocking popup in the GUI). Reject up front instead of storing the poison.
+  -- Note: these are internal ids (e.g. "Solaris", "Ralakesh"), NOT display names ("Soul of Solaris").
+  local function pantheonError(slot, v)
+    local ids = {}
+    if data and data.pantheons then for id in pairs(data.pantheons) do table.insert(ids, id) end end
+    table.sort(ids)
+    return slot .. ' "' .. v .. '" is not a valid pantheon id — use "None" or one of: ' ..
+           table.concat(ids, ', ') .. ' (internal ids, not display names like "Soul of Solaris")'
+  end
+  if params.pantheonMajorGod ~= nil then
+    local v = tostring(params.pantheonMajorGod)
+    if v ~= 'None' and not (data and data.pantheons and data.pantheons[v]) then
+      return nil, pantheonError('pantheonMajorGod', v)
+    end
+    input.pantheonMajorGod = v; changed = true
+  end
+  if params.pantheonMinorGod ~= nil then
+    local v = tostring(params.pantheonMinorGod)
+    if v ~= 'None' and not (data and data.pantheons and data.pantheons[v]) then
+      return nil, pantheonError('pantheonMinorGod', v)
+    end
+    input.pantheonMinorGod = v; changed = true
+  end
   if params.enemyLevel ~= nil then build.configTab.enemyLevel = tonumber(params.enemyLevel) or build.configTab.enemyLevel; changed = true end
   if changed and build.configTab.BuildModList then build.configTab:BuildModList() end
   M.get_main_output()
