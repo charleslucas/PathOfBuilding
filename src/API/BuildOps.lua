@@ -223,12 +223,24 @@ end
 -- Basic build info
 function M.get_build_info()
   if not build then return nil, 'build not initialized' end
+  local spec = build.spec
+  -- build.buildClassName / build.buildAscendName are not real PoB fields (never defined
+  -- anywhere in the codebase, upstream or ours) -- always nil, so class/ascendancy always
+  -- reported as "Unknown"/"None" regardless of the actual build. The real, live values are
+  -- on the passive spec: curClassName / curAscendClassName (see PassiveSpec.lua's own
+  -- display logic, which prefers curClassName when no ascendancy is selected, i.e.
+  -- curAscendClassId == 0).
+  local className = spec and spec.curClassName or nil
+  local ascendClassName = nil
+  if spec and spec.curAscendClassId and spec.curAscendClassId ~= 0 then
+    ascendClassName = spec.curAscendClassName
+  end
   local info = {
     name = build.buildName,
     level = build.characterLevel,
-    className = build and build.buildClassName or (build.Build and build.Build.className) or nil,
-    ascendClassName = build and build.buildAscendName or (build.Build and build.Build.ascendClassName) or nil,
-    treeVersion = build.targetVersion or (build.spec and build.spec.treeVersion) or nil,
+    className = className,
+    ascendClassName = ascendClassName,
+    treeVersion = build.targetVersion or (spec and spec.treeVersion) or nil,
   }
   return info
 end
