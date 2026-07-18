@@ -11,21 +11,29 @@ local m_max = math.max
 local m_floor = math.floor
 
 local dmgTypeList = {"Physical", "Lightning", "Cold", "Fire", "Chaos"}
-local catalystList = {"Abrasive", "Accelerating", "Fertile", "Imbued", "Intrinsic", "Noxious", "Prismatic", "Tempering", "Turbulent", "Unstable"}
+local catalystList = {"Abrasive", "Accelerating", "Dextral", "Fertile", "Imbued", "Intrinsic", "Noxious", "Prismatic", "Sinistral", "Tempering", "Turbulent", "Unstable"}
+local catalystDescriptorList = {"Attack", "Speed", "Suffix", "Life and Mana", "Caster", "Attribute", "Physical and Chaos", "Resistance", "Prefix", "Defence", "Elemental", "Critical"}
 local catalystTags = {
 	{ "attack" },
 	{ "speed" },
+	{ "suffix" },
 	{ "life", "mana", "resource" },
 	{ "caster" },
 	{ "jewellery_attribute", "attribute" },
 	{ "physical_damage", "chaos_damage" },
 	{ "jewellery_resistance", "resistance" },
-	{ "jewellery_defense", "defences" },
+	{ "prefix" },
+	{ "jewellery_defense", "defences", "armour", "evasion", "energyshield" },
 	{ "jewellery_elemental" ,"elemental_damage" },
 	{ "critical" },
 }
 
-local function getCatalystScalar(catalystId, tags, quality)
+local function getCatalystScalar(catalystId, mod, quality)
+	if mod.unscalable then
+		return 1
+	end
+	local tags = mod.modTags
+	local affixType = mod.type
 	if not catalystId or type(catalystId) ~= "number" or not catalystTags[catalystId] or not tags or type(tags) ~= "table" or #tags == 0 then
 		return 1
 	end
@@ -37,6 +45,9 @@ local function getCatalystScalar(catalystId, tags, quality)
 	local tagLookup = {}
 	for _, curTag in ipairs(tags) do
 		tagLookup[curTag] = true;
+	end
+	if affixType == "Prefix" or affixType == "Suffix" then -- Sinistral/Dextral
+		tagLookup[affixType:lower()] = true
 	end
 
 	-- Find if any of the catalyst's tags match the provided tags
@@ -71,7 +82,7 @@ end
 local lineFlags = {
 	["crafted"] = true, ["crucible"] = true, ["custom"] = true, ["eater"] = true, ["enchant"] = true,
 	["exarch"] = true, ["fractured"] = true, ["implicit"] = true, ["scourge"] = true, ["synthesis"] = true,
-	["mutated"] = true
+	["mutated"] = true, ["unscalable"] = true
 }
 
 -- Special function to store unique instances of modifier on specific item slots
@@ -330,6 +341,9 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 		end
 	end
 	if self.rawLines[l] then
+		if self.rawLines[l] == "--------" then
+			l = l + 1
+		end
 		self.name = self.rawLines[l]
 		-- Determine if "Unidentified" item
 		local unidentified = false
@@ -369,6 +383,8 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 	local deferJewelRadiusIndexAssignment
 	local gameModeStage = "FINDIMPLICIT"
 	local foundExplicit, foundImplicit
+	local linePrefix = ""
+	local linePostfix = ""
 
 	while self.rawLines[l] do	
 		local line = self.rawLines[l]
@@ -380,6 +396,8 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 		elseif tinctureBuffLines and tinctureBuffLines[line] then
 			tinctureBuffLines[line] = nil
 		elseif line == "--------" then
+			linePrefix = ""
+			linePostfix = ""
 			self.checkSection = true
 		elseif line == "Split" then
 			self.split = true
@@ -398,7 +416,68 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 			self[influenceItemMap[line]] = true
 		elseif line == "Requirements:" then
 			-- nothing to do
+		elseif line:match("^%(%a+") then
+			-- Reminder text, nothing to parse
+			while self.rawLines[l] and not self.rawLines[l]:match("%)$") do
+				l = l + 1
+			end
+		elseif line:match("^{ ") then
+			-- We're parsing advanced copy/paste format
+			linePrefix = ""
+			linePostfix = ""
+			self.crafted = true
+			local fullModName, modTags, increasedAmt = line:match("^{ (.-) %- (.-)  %- (%d*).*}$")
+			if not fullModName then
+				fullModName, modTags = line:match("^{ (.-) %- (.-) }$")
+			end
+			if not fullModName then
+				fullModName = line:match("^{ (.-) }$")
+			end
+			local modName = fullModName:match("^.*Modifier \"(.*)\"")
+			if modName and modName ~= "" and self.affixes then
+				self.pendingAffixList = { }
+				local backupAffixList = { }
+				for modId, modData in pairs(self.affixes) do
+					if modData.affix == modName then
+						if self:CanHaveMod(modData) then
+							if modData.type == "Prefix" then
+								t_insert(self.pendingAffixList, { modId = modId, table = self.prefixes })
+							elseif modData.type == "Suffix" then
+								t_insert(self.pendingAffixList, { modId = modId, table = self.suffixes })
+							end
+						else
+							-- Conqueror mods can't natively spawn on items, so we'll use those if we don't find a match otherwise
+							if modData.type == "Prefix" then
+								t_insert(backupAffixList, { modId = modId, table = self.prefixes })
+							elseif modData.type == "Suffix" then
+								t_insert(backupAffixList, { modId = modId, table = self.suffixes })
+							end
+						end
+					end
+				end
+				if #self.pendingAffixList == 0 and #backupAffixList > 0 then
+					self.pendingAffixList = backupAffixList
+				end
+				if #self.pendingAffixList == 0 and #backupAffixList == 0 then
+					-- Could be a veiled, temple, or other custom mod, so just keep it around
+					linePrefix = "{custom}"
+				end
+			elseif fullModName:match("(.*)Enhancement.*") then
+				linePostfix = " (enchant)"
+			end
+			local possibleLineFlags = fullModName:gsub("Foulborn", "Mutated"):match("(.*)Modifier.*")
+			if possibleLineFlags then
+				for flag in possibleLineFlags:gmatch("%a+") do
+					if lineFlags[flag:lower()] then
+						linePrefix = linePrefix .. "{" .. flag:lower() .. "}"
+					end
+				end
+			end
+			if modTags and modTags ~= "" then
+				linePrefix = linePrefix .. "{tags:" .. modTags:lower():gsub("%s+", "") .. "}"
+			end
 		else
+			line = linePrefix .. line .. linePostfix
 			if self.checkSection then
 				if gameModeStage == "IMPLICIT" then
 					if foundImplicit then
@@ -417,7 +496,7 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 				end
 				self.checkSection = false
 			end
-			local specName, specVal = line:match("^([%a ]+:?): (.+)$")
+			local specName, specVal = line:match("^([%a %(%)]+:?): (.+)$")
 			if specName then
 				if specName == "Class:" then
 					specName = "Requires Class"
@@ -432,6 +511,13 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 					self.itemLevel = specToNumber(specVal)
 				elseif specName == "Requires Class" then
 					self.classRestriction = specVal
+				elseif specName:match("Quality %(%a+ Modifiers%)") then
+					self.catalystQuality = specToNumber(specVal:match("(%d+)%%"))
+					for i=1, #catalystDescriptorList do
+						if specName:match("Quality %(([%a%s]+) Modifiers%)") == catalystDescriptorList[i] then
+							self.catalyst = i
+						end
+					end
 				elseif specName == "Quality" then
 					self.quality = specToNumber(specVal)
 				elseif specName == "Sockets" then
@@ -732,7 +818,76 @@ function ItemClass:ParseRaw(raw, rarity, highQuality)
 					foundImplicit = true
 					gameModeStage = "IMPLICIT"
 				end
-				local catalystScalar = getCatalystScalar(self.catalyst, modLine.modTags, self.catalystQuality)
+				local catalystScalar = 1
+				if line:match(" %- Unscalable Value$") then
+					line = line:gsub(" %- Unscalable Value$", "")
+					modLine.unscalable = true
+				else
+					catalystScalar = getCatalystScalar(self.catalyst, modLine, self.catalystQuality)
+				end
+				if self.pendingAffixList and #self.pendingAffixList > 0 then
+					if #self.pendingAffixList > 1 then
+						-- Probably a conqueror or essence mod since the mod name is the same for all of them
+						-- Try to match the line against one of the mods there
+						local valueStrippedLine = line:gsub("%-?%d+%.?%d*%(", "("):gsub("%-?%d+%.?%d*", "#")
+						for _, pendingAffix in ipairs(self.pendingAffixList) do
+							local modData = self.affixes[pendingAffix.modId]
+							for _, modDataLine in ipairs(modData) do
+								-- Prefer the exact match
+								if line == modDataLine then
+									self.pendingAffixList = { pendingAffix }
+									break
+								end
+								if valueStrippedLine == modDataLine:gsub("%-?%d+%.?%d*", "#") then
+									self.pendingAffixList = { pendingAffix }
+									break
+								end
+							end	
+						end
+					end
+					-- Use rolling Delta/Range in case one range is 1-3 and another is 1-100 so we get the finest precision possible
+					local bestPrecisionDelta = -1
+					local bestPrecisionRange = -1
+					for value, range in line:gmatch("(%-?%d+%.?%d*)%((%-?%d+%.?%d*%-%-?%d+%.?%d*)%)") do
+						-- Find advanced copy paste format: 45(40-50)
+						local min, max = range:match("(%-?%d+%.?%d*)%-(%-?%d+%.?%d*)")
+						local delta = tonumber(max) - min
+						line = line:gsub(value .. "%(" .. range:gsub("%-", "%%-") .. "%)", value)
+						if delta > bestPrecisionDelta then
+							bestPrecisionRange = round((value - min) / delta, 3)
+							bestPrecisionDelta = delta
+						end
+					end
+					t_insert(self.pendingAffixList[1].table, {
+						modId = self.pendingAffixList[1].modId,
+						range = bestPrecisionRange >= 0 and bestPrecisionRange <= 1 and bestPrecisionRange or 0.5,
+					})
+					self.pendingAffixList = {}
+				else
+					-- Use rolling Delta/Range in case one range is 1-3 and another is 1-100 so we get the finest precision possible
+					local bestPrecisionDelta = -1
+					local bestPrecisionRange = -1
+					
+					-- Replace non-number ranges as unsupported
+					line = line:gsub("(%a+)%([%a%s]+%-[%a%s]+%)", "%1")
+
+					for value, range in line:gmatch("(%-?%d+%.?%d*)%((%-?%d+%.?%d*%-%-?%d+%.?%d*)%)") do
+						local min, max = range:match("(%-?%d+%.?%d*)%-(%-?%d+%.?%d*)")
+						local delta = tonumber(max) - min
+						if delta > bestPrecisionDelta then
+							bestPrecisionRange = round((value - min) / delta, 3)
+							bestPrecisionDelta = delta
+						end
+						if bestPrecisionRange > 1 or bestPrecisionRange < 0 then
+							line = line:gsub(value .. "%(" .. range:gsub("%-", "%%-") .. "%)", value)
+						else
+							line = line:gsub(value .. "%(" .. range:gsub("%-", "%%-") .. "%)", (tonumber(value) < 0 and "+" or "") .. "(" .. range .. ")")
+						end
+					end
+					if bestPrecisionRange <= 1 and bestPrecisionRange >= 0 then
+						modLine.range = bestPrecisionRange
+					end
+				end
 				local rangedLine = itemLib.applyRange(line, 1, catalystScalar)
 				local modList, extra = modLib.parseMod(rangedLine)
 				if (not modList or extra) and self.rawLines[l+1] then
@@ -1134,6 +1289,9 @@ function ItemClass:BuildRaw()
 		if modLine.synthesis then
 			line = "{synthesis}" .. line
 		end
+		if modLine.unscalable then
+			line = "{unscalable}" .. line
+		end
 		if modLine.variantList then
 			local varSpec
 			for varId in pairs(modLine.variantList) do
@@ -1275,7 +1433,7 @@ function ItemClass:Craft()
 					self.nameSuffix = self.nameSuffix .. " " .. mod.affix
 				end
 				self.requirements.level = m_max(self.requirements.level or 0, m_floor(mod.level * 0.8))
-				local rangeScalar = getCatalystScalar(self.catalyst, mod.modTags, self.catalystQuality)
+				local rangeScalar = getCatalystScalar(self.catalyst, mod, self.catalystQuality)
 				for i, line in ipairs(mod) do
 					line = itemLib.applyRange(line, affix.range or 0.5, rangeScalar)
 					local order = mod.statOrder[i]
@@ -1703,7 +1861,7 @@ function ItemClass:BuildModList()
 					-- Check if line actually has a range
 					if modLine.line:find("%((%-?%d+%.?%d*)%-(%-?%d+%.?%d*)%)") then
 						local strippedModeLine = modLine.line:gsub("\n"," ")						
-						local catalystScalar = getCatalystScalar(self.catalyst, modLine.modTags, self.catalystQuality)
+						local catalystScalar = getCatalystScalar(self.catalyst, modLine, self.catalystQuality)
 						-- Put the modified value into the string
 						local line = itemLib.applyRange(strippedModeLine, modLine.range, catalystScalar)
 						-- Check if we can parse it before adding the mods
@@ -1829,4 +1987,26 @@ function ItemClass:BuildModList()
 	else
 		self.modList = self:BuildModListForSlotNum(baseList)
 	end
+end
+
+function ItemClass:CanHaveMod(mod)
+	local keyMap, includeTags = { }, { }
+	for index, key in ipairs(mod.weightKey) do
+		keyMap[key] = index
+	end
+	-- check for uniques with off-tag mods
+	if data.casterTagCrucibleUniques[self.title] then
+		includeTags["caster_unique_weapon"] = true
+	end
+	if data.minionTagCrucibleUniques[self.title] then
+		includeTags["minion_unique_weapon"] = true
+	end
+	if self.canHaveOnlySupportSkillsCrucibleTree then
+			return keyMap["crucible_unique_staff"] and mod.weightVal[keyMap["crucible_unique_staff"]] ~= 0
+	elseif self.canHaveShieldCrucibleTree then
+		return self:GetModSpawnWeight(mod, { ["crucible_unique_helmet"] = true, ["shield"] = true }) > 0
+	elseif self.canHaveTwoHandedSwordCrucibleTree then
+		return self:GetModSpawnWeight(mod, { ["two_hand_weapon"] = true }, { ["one_hand_weapon"] = true }) > 0
+	end
+	return self:GetModSpawnWeight(mod, includeTags) > 0
 end
