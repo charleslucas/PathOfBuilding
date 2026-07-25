@@ -7,6 +7,11 @@ local function debug_log(msg)
   if DEBUG then io.stderr:write('[Handlers] ' .. msg .. '\n') end
 end
 
+-- JSON: PoB bundles dkjson under lua/ and requires it as a local module (see
+-- Classes/ImportTab.lua, Modules/Data.lua) — there is NO global `dkjson`. Require
+-- it the same way for JSON decoding in the import handlers (3.29 import contract).
+local dkjson = require('dkjson')
+
 -- Resolve BuildOps reliably regardless of CWD
 local BuildOps
 do
@@ -473,15 +478,20 @@ handlers.import_passive_tree = function(params)
   local ctrl = build.importTab.controls.charImportTreeClearJewels
   if ctrl then ctrl.state = clearJewels end
 
-  -- ImportPassiveTreeAndJewels reads the global `charSelectLeague` as a
-  -- DropDownControl object and calls :GetSelValueByKey("league") on it.
-  -- Provide a minimal shim so the call succeeds when invoked via the API.
-  local leagueName = (type(charData) == 'table' and charData.league) or 'Standard'
-  local _origLeague = _G.charSelectLeague
-  _G.charSelectLeague = { GetSelValueByKey = function(_, _) return leagueName end }
+  -- PoB 3.29 changed the signature to ImportPassiveTreeAndJewels(charData, deleteJewels).
+  -- charData now carries the PARSED passives (charData.passives) and jewels
+  -- (charData.jewels = passives.items); the method reads charData.league directly and no
+  -- longer takes the raw JSON string or the global charSelectLeague. Mirror PoB's own
+  -- DownloadPassiveTree flow (Classes/ImportTab.lua): decode the passive-skills JSON and
+  -- attach it to charData before the call.
+  local passivesTable, _, decErr = dkjson.decode(params.json)
+  if type(passivesTable) ~= 'table' then
+    return { ok = false, error = 'failed to decode passives json: ' .. tostring(decErr) }
+  end
+  charData.passives = passivesTable
+  charData.jewels = passivesTable.items
 
-  local ok, err = pcall(build.importTab.ImportPassiveTreeAndJewels, build.importTab, params.json, charData)
-  _G.charSelectLeague = _origLeague  -- restore so PoB's own UI is unaffected
+  local ok, err = pcall(build.importTab.ImportPassiveTreeAndJewels, build.importTab, charData, clearJewels)
   if not ok then
     return { ok = false, error = 'import_passive_tree exception: ' .. tostring(err) }
   end
@@ -512,17 +522,30 @@ handlers.import_items_skills = function(params)
   if ctrls.charImportItemsClearSkills      then ctrls.charImportItemsClearSkills.state      = params.clear_skills ~= false end
   if ctrls.charImportItemsIgnoreWeaponSwap then ctrls.charImportItemsIgnoreWeaponSwap.state = params.ignore_weapon_swap == true end
 
-  local ok, charData = pcall(build.importTab.ImportItemsAndSkills, build.importTab, params.json)
+  -- PoB 3.29 changed the signature to
+  -- ImportItemsAndSkills(charData, clearItems, clearSkills, ignoreWeaponSwap), where charData
+  -- carries the equipment (charData.equipment = items). It no longer takes the raw JSON
+  -- string. The get-items API response has both `.items` and `.character`; mirror PoB's own
+  -- DownloadItems flow. (The clear controls above are now redundant with the args but harmless.)
+  local resp, _, decErr = dkjson.decode(params.json)
+  if type(resp) ~= 'table' then
+    return { ok = false, error = 'failed to decode items json: ' .. tostring(decErr) }
+  end
+  local charData = (type(resp.character) == 'table') and resp.character or {}
+  charData.equipment = resp.items
+
+  local ok, ret = pcall(build.importTab.ImportItemsAndSkills, build.importTab, charData,
+    params.clear_items ~= false, params.clear_skills ~= false, params.ignore_weapon_swap == true)
   if not ok then
-    return { ok = false, error = 'import_items_skills exception: ' .. tostring(charData) }
+    return { ok = false, error = 'import_items_skills exception: ' .. tostring(ret) }
   end
 
   BuildOps.get_main_output()
   return {
     ok        = true,
     status    = 'Items and skills imported',
-    level     = type(charData) == 'table' and charData.level or nil,
-    character = type(charData) == 'table' and charData or nil,
+    level     = (type(ret) == 'table' and ret.level) or (type(charData) == 'table' and charData.level) or nil,
+    character = (type(ret) == 'table' and ret) or charData,
   }
 end
 
