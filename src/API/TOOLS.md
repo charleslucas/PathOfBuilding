@@ -30,6 +30,7 @@ pob-mcp calls these actions via the `PoBLuaTcpClient` / `PoBLuaApiClient` bridge
 | `save_build` | both | Write the current build XML to a file path | `path` |
 | `get_build_info` | both | Name, level, class, ascendancy, tree version | — |
 | `set_level` | both | Set character level and rebuild | `level` |
+| `set_view_mode` | TCP only | Switch the visible GUI tab via `build.viewMode` (TREE/SKILLS/ITEMS/CALCS/CONFIG/NOTES/IMPORT/PARTY/COMPARE) | `mode` |
 
 ---
 

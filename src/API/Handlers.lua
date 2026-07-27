@@ -184,6 +184,15 @@ handlers.set_level = function(params)
   return { ok = true }
 end
 
+handlers.set_view_mode = function(params)
+  if not params or params.mode == nil then
+    return { ok = false, error = 'missing mode' }
+  end
+  local ok2, result = BuildOps.set_view_mode(params.mode)
+  if not ok2 then return { ok = false, error = result } end
+  return { ok = true, mode = result }
+end
+
 handlers.set_flask_active = function(params)
   local ok2, err = BuildOps.set_flask_active(params or {})
   if not ok2 then return { ok = false, error = err } end

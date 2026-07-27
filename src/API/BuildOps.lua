@@ -220,6 +220,28 @@ function M.set_level(level)
   return true
 end
 
+-- Switch the visible GUI tab (build.viewMode). TCP/GUI only; harmless headless.
+-- These are exactly the modes PoB's own tab buttons set (see Modules/Build.lua);
+-- the frame loop redraws to the selected tab on the next frame.
+local VALID_VIEW_MODES = {
+  TREE = true, SKILLS = true, ITEMS = true, CALCS = true,
+  CONFIG = true, NOTES = true, IMPORT = true, PARTY = true, COMPARE = true,
+}
+function M.set_view_mode(mode)
+  if not build then
+    return nil, 'build not initialized'
+  end
+  if type(mode) ~= 'string' or mode == '' then
+    return nil, 'missing mode'
+  end
+  local m = string.upper(mode)
+  if not VALID_VIEW_MODES[m] then
+    return nil, 'invalid view mode "' .. tostring(mode) .. '" (expected TREE/SKILLS/ITEMS/CALCS/CONFIG/NOTES/IMPORT/PARTY/COMPARE)'
+  end
+  build.viewMode = m
+  return true, m
+end
+
 -- Basic build info
 function M.get_build_info()
   if not build then return nil, 'build not initialized' end
