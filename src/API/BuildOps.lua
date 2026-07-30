@@ -385,12 +385,20 @@ end
 -- Get basic config values
 function M.get_config()
   if not build or not build.configTab then return nil, 'build/config not initialized' end
-  local cfg = {
-    bandit = build.configTab.input and build.configTab.input.bandit or build.bandit,
-    pantheonMajorGod = build.configTab.input and build.configTab.input.pantheonMajorGod or build.pantheonMajorGod,
-    pantheonMinorGod = build.configTab.input and build.configTab.input.pantheonMinorGod or build.pantheonMinorGod,
-    enemyLevel = build.configTab.enemyLevel,
-  }
+  -- Return EVERY set config option, not just the four special ones — callers need to
+  -- read back what actually landed (set_config used to silently drop everything else).
+  local cfg = {}
+  local input = build.configTab.input
+  if type(input) == 'table' then
+    for k, v in pairs(input) do
+      local t = type(v)
+      if t == 'string' or t == 'number' or t == 'boolean' then cfg[k] = v end
+    end
+  end
+  cfg.bandit = (input and input.bandit) or build.bandit
+  cfg.pantheonMajorGod = (input and input.pantheonMajorGod) or build.pantheonMajorGod
+  cfg.pantheonMinorGod = (input and input.pantheonMinorGod) or build.pantheonMinorGod
+  cfg.enemyLevel = build.configTab.enemyLevel
   return cfg
 end
 
@@ -429,9 +437,50 @@ function M.set_config(params)
     input.pantheonMinorGod = v; changed = true
   end
   if params.enemyLevel ~= nil then build.configTab.enemyLevel = tonumber(params.enemyLevel) or build.configTab.enemyLevel; changed = true end
-  if changed and build.configTab.BuildModList then build.configTab:BuildModList() end
+
+  -- Generic passthrough for every OTHER Config-tab option (charges, conditions, buffs,
+  -- enemy state, multipliers...). Previously these were silently DISCARDED while the
+  -- caller was told the write succeeded, so sims quietly used stale config.
+  --
+  -- Validate against the tab's own registry so a typo is a loud error, not a silent no-op.
+  -- `varControls` is keyed by every option's var name; `defaultState` carries a value of the
+  -- option's expected type (check->boolean, count->number, list/string->string), which is how
+  -- we coerce without duplicating ConfigOptions' type table.
+  local SPECIAL = { bandit = true, pantheonMajorGod = true, pantheonMinorGod = true, enemyLevel = true }
+  local applied = {}
+  for k, v in pairs(params) do
+    if not SPECIAL[k] then
+      local known = build.configTab.varControls and build.configTab.varControls[k]
+      if not known then
+        return nil, 'unknown config option "' .. tostring(k) .. '" (must match a Config tab var name, e.g. multiplierWitheredStackCount, minionbuffUnholyMight, usePowerCharges)'
+      end
+      local def = build.configTab.defaultState and build.configTab.defaultState[k]
+      local dt = type(def)
+      if dt == 'boolean' then
+        input[k] = (v == true or v == 'true' or v == 1)
+      elseif dt == 'number' then
+        local n = tonumber(v)
+        if not n then return nil, 'config option "' .. k .. '" expects a number, got ' .. tostring(v) end
+        input[k] = n
+      elseif v == nil then
+        input[k] = nil
+      else
+        input[k] = tostring(v)
+      end
+      applied[k] = input[k]
+      changed = true
+    end
+  end
+
+  if changed then
+    -- Mirror what the GUI does on a control change: refresh controls (so the visible tab
+    -- matches), rebuild the mod list, and flag the build dirty so outputs recompute.
+    if build.configTab.UpdateControls then pcall(function() build.configTab:UpdateControls() end) end
+    if build.configTab.BuildModList then build.configTab:BuildModList() end
+    build.buildFlag = true
+  end
   M.get_main_output()
-  return true
+  return { applied = applied }
 end
 
 
