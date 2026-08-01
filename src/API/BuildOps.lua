@@ -113,8 +113,15 @@ function M.set_tree(params)
   -- Passing {} drops all node overrides that were loaded from the build XML.
   local hashOverrides = (build.spec.hashOverrides ~= nil) and build.spec.hashOverrides or {}
   local treeVersion = params.treeVersion
-  -- Import (resets nodes internally and rebuilds)
-  build.spec:ImportFromNodeList(classId, ascendId, secondaryId, nodes, hashOverrides, mastery, treeVersion)
+  -- Import (resets nodes internally and rebuilds).
+  -- ⚠ PoB 3.29 added a LEADING `className` parameter:
+  --   ImportFromNodeList(className, classId, ascendClassId, secondaryAscendClassId,
+  --                      hashList, hashOverrides, masteryEffects, treeVersion)
+  -- Passing the old 7-arg form shifted every argument by one: our numeric classId landed
+  -- in `className`, which is truthy, so PoB did classNameMap[<number>] -> nil and then
+  -- SelectClass(nil) -> "attempt to index local 'class' (a nil value)". Pass nil for
+  -- className so the numeric classId/ascendClassId path is used.
+  build.spec:ImportFromNodeList(nil, classId, ascendId, secondaryId, nodes, hashOverrides, mastery, treeVersion)
   -- Rebuild calcs to reflect changes
   M.get_main_output()
   return true
@@ -290,7 +297,8 @@ function M.update_tree_delta(params)
   local tv = params.treeVersion or current.treeVersion
   -- Bug 2c: Preserve existing hashOverrides (tattoo/node overrides loaded from build XML).
   local hashOverrides = (build.spec.hashOverrides ~= nil) and build.spec.hashOverrides or {}
-  build.spec:ImportFromNodeList(tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, nodes, hashOverrides, mastery, tv)
+  -- See the signature note in set_tree: PoB 3.29 prepended a `className` parameter.
+  build.spec:ImportFromNodeList(nil, tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, nodes, hashOverrides, mastery, tv)
   M.get_main_output()
   return true
 end
