@@ -1588,10 +1588,27 @@ function M.set_socket_group_enabled(params)
   local socketGroup = skillSet.socketGroupList[groupIndex]
   if not socketGroup then return nil, 'socket group not found at index ' .. tostring(groupIndex) end
   socketGroup.enabled = params.enabled == true
+  -- Full-DPS inclusion + instance count were previously settable only at group CREATION,
+  -- so a minion build's swarm DPS could not be measured over the API at all — the user had
+  -- to tick "Include in Full DPS" and set Count by hand in the GUI. Allow updating them here.
+  if params.includeInFullDPS ~= nil then
+    socketGroup.includeInFullDPS = params.includeInFullDPS == true
+  end
+  if params.count ~= nil then
+    local n = tonumber(params.count)
+    if not n or n < 1 then return nil, 'count must be a positive number (the real minion/instance quantity)' end
+    socketGroup.groupCount = n
+  end
   if build.skillsTab.ProcessSocketGroup then build.skillsTab:ProcessSocketGroup(socketGroup) end
   build.buildFlag = true
   M.get_main_output()
-  return { groupIndex = groupIndex, label = socketGroup.label or '', enabled = socketGroup.enabled }
+  return {
+    groupIndex = groupIndex,
+    label = socketGroup.label or '',
+    enabled = socketGroup.enabled,
+    includeInFullDPS = socketGroup.includeInFullDPS,
+    count = socketGroup.groupCount,
+  }
 end
 
 function M.set_gem_enabled(params)
