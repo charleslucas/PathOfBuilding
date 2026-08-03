@@ -81,6 +81,13 @@ function M.get_tree()
     out.masteryEffects[mastery] = effect
   end
   table.sort(out.nodes)
+  -- pointsUsed/ascendancyPointsUsed: consumed by the MCP layer to warn on the 8-point
+  -- ascendancy cap. These were read as `tree.ascendancyPointsUsed` for a long time while
+  -- nothing ever emitted them, so the cap warning could never fire.
+  local pointsUsed, ascUsed, secondaryAscUsed = spec:CountAllocNodes()
+  out.pointsUsed = pointsUsed or 0
+  out.ascendancyPointsUsed = ascUsed or 0
+  out.secondaryAscendancyPointsUsed = secondaryAscUsed or 0
   return out
 end
 
@@ -275,32 +282,120 @@ function M.get_build_info()
 end
 
 -- Update tree by delta lists
+-- Incrementally add/remove passive nodes.
+--
+-- Adds are routed through PoB's own spec:AllocNode(), which allocates the target AND every
+-- node along node.path -- i.e. real auto-pathing. The previous implementation simply unioned
+-- the requested IDs into a node list and handed it to ImportFromNodeList, which SILENTLY DROPS
+-- anything not already connected to the tree. Asking for one non-adjacent notable therefore
+-- allocated nothing while still reporting success.
+--
+-- Returns actual outcomes (never the requested counts) so callers cannot report a phantom edit:
+--   added        - nodes newly allocated that the caller explicitly asked for
+--   removed      - nodes actually deallocated
+--   autoPathedNodes - intermediates PoB pulled in to maintain connectivity
+--   droppedNodes - requested adds that could NOT be allocated (no path / bad ID)
+--   skippedAscendancyNodes - adds refused because they'd exceed the 8-point ascendancy cap
 function M.update_tree_delta(params)
   if not build or not build.spec then return nil, 'build/spec not initialized' end
+  local spec = build.spec
   local current, err = M.get_tree()
   if not current then return nil, err end
-  local set = {}
-  for _, id in ipairs(current.nodes) do set[id] = true end
-  if params and type(params.removeNodes) == 'table' then
-    for _, id in ipairs(params.removeNodes) do set[tonumber(id)] = nil end
+  params = params or {}
+
+  local before = {}
+  for _, id in ipairs(current.nodes) do before[tonumber(id)] = true end
+
+  -- Phase 1: removals, via ImportFromNodeList (rebuilding the list is the only way to
+  -- deallocate, and it correctly prunes anything orphaned by the removal).
+  local removeReq = {}
+  if type(params.removeNodes) == 'table' then
+    for _, id in ipairs(params.removeNodes) do removeReq[tonumber(id)] = true end
   end
-  if params and type(params.addNodes) == 'table' then
-    for _, id in ipairs(params.addNodes) do set[tonumber(id)] = true end
+  if next(removeReq) then
+    local keep = {}
+    for id in pairs(before) do
+      if not removeReq[id] then table.insert(keep, id) end
+    end
+    table.sort(keep)
+    local mastery  = current.masteryEffects or {}
+    local classId  = params.classId or current.classId or 0
+    local ascendId = params.ascendClassId or current.ascendClassId or 0
+    local secId    = params.secondaryAscendClassId or current.secondaryAscendClassId or 0
+    local tv       = params.treeVersion or current.treeVersion
+    -- Bug 2c: Preserve existing hashOverrides (tattoo/node overrides loaded from build XML).
+    local hashOverrides = (spec.hashOverrides ~= nil) and spec.hashOverrides or {}
+    -- See the signature note in set_tree: PoB 3.29 prepended a `className` parameter.
+    spec:ImportFromNodeList(nil, tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, keep, hashOverrides, mastery, tv)
   end
-  local nodes = {}
-  for id,_ in pairs(set) do table.insert(nodes, id) end
-  table.sort(nodes)
-  local mastery = current.masteryEffects or {}
-  local classId = params.classId or current.classId or 0
-  local ascendId = params.ascendClassId or current.ascendClassId or 0
-  local secId = params.secondaryAscendClassId or current.secondaryAscendClassId or 0
-  local tv = params.treeVersion or current.treeVersion
-  -- Bug 2c: Preserve existing hashOverrides (tattoo/node overrides loaded from build XML).
-  local hashOverrides = (build.spec.hashOverrides ~= nil) and build.spec.hashOverrides or {}
-  -- See the signature note in set_tree: PoB 3.29 prepended a `className` parameter.
-  build.spec:ImportFromNodeList(nil, tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, nodes, hashOverrides, mastery, tv)
+
+  -- Phase 2: additions, via PoB's pathfinder.
+  local addReq, dropped, skippedAsc = {}, {}, {}
+  if type(params.addNodes) == 'table' then
+    for _, id in ipairs(params.addNodes) do
+      local n = tonumber(id)
+      if n then addReq[n] = true end
+    end
+  end
+  if next(addReq) then
+    -- Populates node.path / node.pathDist, which AllocNode walks.
+    spec:BuildAllDependsAndPaths()
+    -- Deterministic order so a failure is reproducible rather than pairs()-order dependent.
+    local ordered = {}
+    for id in pairs(addReq) do table.insert(ordered, id) end
+    table.sort(ordered)
+    for _, id in ipairs(ordered) do
+      -- Node keys may be numeric or string depending on how the spec was built; probe both
+      -- (same defensive lookup as calc_with).
+      local node = spec.nodes[id] or spec.nodes[tostring(id)]
+      local function isAllocated()
+        return (spec.allocNodes[id] or spec.allocNodes[tostring(id)]) ~= nil
+      end
+      if not node then
+        table.insert(dropped, id)
+      elseif not isAllocated() then
+        local _, ascUsed = spec:CountAllocNodes()
+        if node.ascendancyName and (ascUsed or 0) >= 8 then
+          table.insert(skippedAsc, id)
+        else
+          spec:AllocNode(node)
+          -- AllocNode is a no-op when node.path is nil (unreachable).
+          if not isAllocated() then
+            table.insert(dropped, id)
+          else
+            -- Newly reachable nodes may exist now; refresh paths for the next iteration.
+            spec:BuildAllDependsAndPaths()
+          end
+        end
+      end
+    end
+  end
+
+  spec:BuildAllDependsAndPaths()
+  build.buildFlag = true
   M.get_main_output()
-  return true
+
+  -- Phase 3: report what ACTUALLY happened by diffing against the pre-edit snapshot.
+  local after, added, removed, autoPathed = {}, {}, {}, {}
+  for id in pairs(spec.allocNodes or {}) do after[tonumber(id)] = true end
+  for id in pairs(after) do
+    if not before[id] then
+      if addReq[id] then table.insert(added, id) else table.insert(autoPathed, id) end
+    end
+  end
+  for id in pairs(before) do
+    if not after[id] then table.insert(removed, id) end
+  end
+  table.sort(added); table.sort(removed); table.sort(autoPathed)
+  table.sort(dropped); table.sort(skippedAsc)
+
+  return {
+    added = added,
+    removed = removed,
+    autoPathedNodes = autoPathed,
+    droppedNodes = dropped,
+    skippedAscendancyNodes = skippedAsc,
+  }
 end
 
 

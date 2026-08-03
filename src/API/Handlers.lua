@@ -212,10 +212,19 @@ handlers.get_gem_detail = function(params)
 end
 
 handlers.update_tree_delta = function(params)
-  local ok2, err = BuildOps.update_tree_delta(params or {})
-  if not ok2 then return { ok = false, error = err } end
+  local res, err = BuildOps.update_tree_delta(params or {})
+  if not res then return { ok = false, error = err } end
   local tree = BuildOps.get_tree()
-  return { ok = true, tree = tree }
+  -- Pass through the ACTUAL outcome so the caller reports what landed, not what was asked for.
+  return {
+    ok = true,
+    tree = tree,
+    added = res.added,
+    removed = res.removed,
+    autoPathedNodes = res.autoPathedNodes,
+    droppedNodes = res.droppedNodes,
+    skippedAscendancyNodes = res.skippedAscendancyNodes,
+  }
 end
 
 handlers.calc_with = function(params)
