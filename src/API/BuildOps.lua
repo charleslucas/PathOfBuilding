@@ -621,7 +621,18 @@ function M.set_flask_active(params)
   end
   local slotName = 'Flask ' .. tostring(idx)
   if not build.itemsTab.activeItemSet or not build.itemsTab.activeItemSet[slotName] then return nil, 'slot not found' end
+  -- ⚠ The calc reads the flask's active state off the SLOT CONTROL, not the item-set entry:
+  -- CalcSetup.lua iterates `build.itemsTab.orderedSlots` and tests `slot.active` to populate
+  -- env.flasks. Writing only activeItemSet[slotName].active left the calc untouched, so this
+  -- tool reported success while flask effects never applied (armour/EHP/PDR unchanged either
+  -- way). Set the slot control, and keep the item-set flag in sync for persistence.
   build.itemsTab.activeItemSet[slotName].active = active
+  local slotCtrl = build.itemsTab.slots and build.itemsTab.slots[slotName]
+  if slotCtrl then
+    slotCtrl.active = active
+  else
+    return nil, 'flask slot control not found for ' .. slotName
+  end
   build.itemsTab:AddUndoState()
   build.buildFlag = true
   M.get_main_output()
