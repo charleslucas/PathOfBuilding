@@ -1747,6 +1747,108 @@ function M.set_gem_enabled(params)
   return true
 end
 
+-- ============================================================
+-- Spectre list (which spectres are "raised" for calc purposes)
+-- ============================================================
+-- The PoE character API never reports raised spectres, so imports can't set these;
+-- until now they were GUI-only (the picker appears only when Raise Spectre is the
+-- selected main skill). build.spectreList is plain data: an array of monster
+-- metadata ids, resolved against build.data.spectres.
+
+local function spectre_library()
+  local lib = build and build.data and build.data.spectres
+  if not lib then return nil, 'spectre data not available' end
+  return lib
+end
+
+-- Resolve a name or metadata id to an id in the spectre library.
+-- Matching: exact id -> exact name (case-insensitive) -> unique substring of name.
+local function resolve_spectre(lib, query)
+  if lib[query] then return query end
+  local q = query:lower()
+  local exact, partial = {}, {}
+  for id, minion in pairs(lib) do
+    local name = (minion.name or ''):lower()
+    if name == q then
+      table.insert(exact, id)
+    elseif name:find(q, 1, true) then
+      table.insert(partial, id)
+    end
+  end
+  if #exact == 1 then return exact[1] end
+  if #exact > 1 then return nil, 'ambiguous exact name (multiple ids share it)' end
+  if #partial == 1 then return partial[1] end
+  if #partial > 1 then
+    local names = {}
+    for i, id in ipairs(partial) do
+      if i > 8 then table.insert(names, '...') break end
+      table.insert(names, (lib[id].name or id))
+    end
+    return nil, 'ambiguous: matches ' .. table.concat(names, ', ')
+  end
+  return nil, 'no spectre matches "' .. query .. '"'
+end
+
+function M.list_spectres(params)
+  if not build then return nil, 'build not initialized' end
+  local lib, err = spectre_library()
+  if not lib then return nil, err end
+  local active = {}
+  for _, id in ipairs(build.spectreList or {}) do
+    local minion = lib[id]
+    table.insert(active, { id = id, name = minion and minion.name or '?' })
+  end
+  local result = { active = active }
+  local query = params and params.search
+  if query and query ~= '' then
+    local q = query:lower()
+    local matches = {}
+    for id, minion in pairs(lib) do
+      if (minion.name or ''):lower():find(q, 1, true) then
+        table.insert(matches, { id = id, name = minion.name or '?' })
+      end
+    end
+    table.sort(matches, function(a, b) return a.name < b.name end)
+    result.search_results = matches
+  end
+  return result
+end
+
+function M.set_spectres(params)
+  if not build then return nil, 'build not initialized' end
+  if type(params) ~= 'table' or type(params.spectres) ~= 'table' then
+    return nil, 'missing spectres (array of names or metadata ids)'
+  end
+  local lib, err = spectre_library()
+  if not lib then return nil, err end
+  local mode = params.mode or 'replace'
+  if mode ~= 'replace' and mode ~= 'add' then return nil, 'mode must be "replace" or "add"' end
+  local resolved = {}
+  for _, query in ipairs(params.spectres) do
+    local id, rerr = resolve_spectre(lib, tostring(query))
+    if not id then return nil, rerr end
+    table.insert(resolved, id)
+  end
+  if mode == 'replace' then
+    wipeTable(build.spectreList)
+  end
+  for _, id in ipairs(resolved) do
+    local already = false
+    for _, existing in ipairs(build.spectreList) do
+      if existing == id then already = true break end
+    end
+    if not already then table.insert(build.spectreList, id) end
+  end
+  build.modFlag = true
+  build.buildFlag = true
+  M.get_main_output()
+  local active = {}
+  for _, id in ipairs(build.spectreList) do
+    table.insert(active, { id = id, name = lib[id] and lib[id].name or '?' })
+  end
+  return { active = active }
+end
+
 
 -- ============================================================
 -- Anointment evaluation

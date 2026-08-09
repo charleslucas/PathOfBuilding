@@ -96,6 +96,8 @@ pob-mcp calls these actions via the `PoBLuaTcpClient` / `PoBLuaApiClient` bridge
 | `remove_skill` | Remove an entire socket group | `groupIndex` |
 | `set_socket_group_enabled` | Enable/disable a socket group | `groupIndex`, `enabled` |
 | `set_gem_enabled` | Enable/disable a specific gem | `groupIndex`, `gemIndex`, `enabled` |
+| `list_spectres` | List active spectres; optionally search the spectre library | `search?` |
+| `set_spectres` | Set the raised-spectre list (names or metadata ids; fuzzy match) | `spectres`, `mode?` |
 
 ---
 

@@ -418,6 +418,18 @@ handlers.set_gem_enabled = function(params)
   return { ok = true }
 end
 
+handlers.list_spectres = function(params)
+  local res, err = BuildOps.list_spectres(params or {})
+  if not res then return { ok = false, error = err or 'failed' } end
+  return { ok = true, result = res }
+end
+
+handlers.set_spectres = function(params)
+  local res, err = BuildOps.set_spectres(params or {})
+  if not res then return { ok = false, error = err or 'failed' } end
+  return { ok = true, result = res }
+end
+
 handlers.get_full_dps_breakdown = function()
   local res, err = BuildOps.get_full_dps_breakdown()
   if not res then return { ok = false, error = err } end
