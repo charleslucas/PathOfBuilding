@@ -669,6 +669,8 @@ function buildMode:Init(dbFileName, buildName, buildXML, convertBuild, importLin
 		self.configTab:ImportCalcSettings()
 	end
 
+	-- reprocess socket groups as they might depend on items which don't necessarily load first.
+	self.skillsTab:UpdateSocketGroups()
 	-- Build calculation output tables
 	wipeGlobalCache()
 	self.outputRevision = 1
@@ -1241,8 +1243,10 @@ function buildMode:OnFrame(inputEvents)
 		-- Rebuild calculation output tables
 		self.outputRevision = self.outputRevision + 1
 		self.buildFlag = false
+		self.skillsTab:UpdateSocketGroups()
 		self.calcsTab:BuildOutput()
 		self:RefreshStatList()
+		self.configTab.calcFunc, self.configTab.calcBase = self.calcsTab:GetMiscCalculator(self)
 	end
 	if main.showThousandsSeparators ~= self.lastShowThousandsSeparators then
 		self:RefreshStatList()
