@@ -242,23 +242,38 @@ local power_kicked   = false  -- true once we've kicked recalc for this connecti
 function M._pump_inner()
   refresh_build()
 
-  -- Kick node power recalc once per connection as soon as a build is loaded.
-  -- Then drive the coroutine ourselves each frame — PoB only calls BuildPower()
-  -- from tree tab rendering, so it won't run in the background otherwise.
+  -- Node power: drive ONLY coroutines that already exist (started by an explicit
+  -- get_node_power(recalculate=true) via BuildOps, or by the tree tab itself).
+  --
+  -- History: this block used to auto-kick a power build on connect AND create one
+  -- whenever PoB's powerBuildFlag was set — pre-warming so tree tools had data
+  -- without the tree tab open. That was cheap when a full power build took seconds.
+  -- The spectre modeling technique (multiple Raise Spectre instances so every
+  -- spectre's buffs are calculated) made each of the ~1300 node evaluations carry
+  -- several full minion environments: a build now takes minutes, PoB re-flags it on
+  -- EVERY build change (CalcsTab:BuildOutput sets powerBuildFlag), and background
+  -- restarts starved this very TCP server — observed as bridge timeouts and a
+  -- pile-up of "Building Power Report" toasts (2026-08-20).
+  --
+  -- Vanilla behaviour is restored: the flag sits harmlessly until the tree tab or
+  -- an explicit API request consumes it. Set POB_API_PREWARM_POWER=1 to restore the
+  -- old on-connect pre-warm (acceptable on builds without heavy minion modeling).
   if _G.build and build.calcsTab then
-    if client_count > 0 and not power_kicked then
+    if os.getenv('POB_API_PREWARM_POWER') == '1' and client_count > 0 and not power_kicked then
       power_kicked = true
       local pm = build.calcsTab.powerMax
       local hasData = pm and ((pm.offence or 0) > 0 or (pm.defence or 0) > 0)
       if not hasData then
         build.calcsTab.powerBuildFlag = true
+        build.calcsTab:BuildPower()  -- create the coroutine so the drive below continues it
       end
     end
-    if build.calcsTab.powerBuilder or build.calcsTab.powerBuildFlag then
+    if build.calcsTab.powerBuilder then
       build.calcsTab:BuildPower()
     end
+    -- Only a live coroutine counts as "building" — powerBuildFlag can now sit set
+    -- indefinitely (vanilla behaviour) without anything running.
     local is_building = build.calcsTab.powerBuilder ~= nil
-                     or build.calcsTab.powerBuildFlag == true
     if not power_building and is_building then
       ConPrintf('[PoB API] Node power recalculation started')
     end
