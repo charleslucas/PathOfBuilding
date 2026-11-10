@@ -250,7 +250,8 @@ end
 handlers.get_config = function(params)
   local cfg, err = BuildOps.get_config()
   if not cfg then return { ok = false, error = err } end
-  return { ok = true, config = cfg }
+  local labels = BuildOps.get_config_labels and BuildOps.get_config_labels() or nil
+  return { ok = true, config = cfg, labels = labels }
 end
 
 handlers.set_config = function(params)

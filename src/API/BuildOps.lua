@@ -560,6 +560,59 @@ function M.get_config()
   return cfg
 end
 
+-- PoB's own option table: var -> varData (type, list of {val,label}). Dropdowns store a val
+-- that often differs from what the GUI shows (bandit "None" reads "Kill all"; pantheon
+-- "TheBrineKing" reads "Soul of the Brine King"). (Ported from pob-mcp upstream 767410d.)
+local configVarIndex
+local function getConfigVarIndex()
+  if configVarIndex then return configVarIndex end
+  local ok, varList = pcall(LoadModule, "Modules/ConfigOptions")
+  if not ok or type(varList) ~= 'table' then return nil end
+  configVarIndex = {}
+  for _, varData in ipairs(varList) do
+    if varData.var then configVarIndex[varData.var] = varData end
+  end
+  return configVarIndex
+end
+
+-- For a list-type option, accept either the stored val or the GUI label (case-insensitive).
+-- Returns (val) for a match, (nil, err) for a list option with no match, or (value) unchanged
+-- for anything that is not a list option.
+local function resolveListValue(var, value)
+  local index = getConfigVarIndex()
+  local varData = index and index[var]
+  if not varData or varData.type ~= 'list' or value == nil then return value end
+  local s = tostring(value)
+  local labels = {}
+  for _, entry in ipairs(varData.list or {}) do
+    if tostring(entry.val) == s then return entry.val end
+    if entry.label and tostring(entry.label):lower() == s:lower() then return entry.val end
+    table.insert(labels, tostring(entry.label or entry.val) .. ' (' .. tostring(entry.val) .. ')')
+  end
+  return nil, '"' .. s .. '" is not a valid option for ' .. var .. ' — one of: ' .. table.concat(labels, ', ')
+end
+
+function M.config_value_label(var, value)
+  local index = getConfigVarIndex()
+  local varData = index and index[var]
+  if not varData or varData.type ~= 'list' then return nil end
+  for _, entry in ipairs(varData.list or {}) do
+    if tostring(entry.val) == tostring(value) then return entry.label end
+  end
+  return nil
+end
+
+function M.get_config_labels()
+  local cfg, err = M.get_config()
+  if not cfg then return nil, err end
+  local labels = {}
+  for k, v in pairs(cfg) do
+    local label = M.config_value_label(k, v)
+    if label then labels[k] = label end
+  end
+  return labels
+end
+
 -- Set selected config values and rebuild
 function M.set_config(params)
   if not build or not build.configTab then return nil, 'build/config not initialized' end
@@ -567,6 +620,14 @@ function M.set_config(params)
   local input = build.configTab.input or {}
   build.configTab.input = input
   local changed = false
+  -- Dropdown values may arrive as GUI labels; map them to stored vals before validating.
+  for _, k in ipairs({ 'bandit', 'pantheonMajorGod', 'pantheonMinorGod' }) do
+    if params[k] ~= nil then
+      local v, lerr = resolveListValue(k, params[k])
+      if lerr then return nil, lerr end
+      params[k] = v
+    end
+  end
   if params.bandit ~= nil then input.bandit = tostring(params.bandit); changed = true end
   -- Pantheon values MUST be a valid id from data.pantheons (or "None"). An invalid value
   -- poisons the build: CalcSetup.lua skips the lookup only for exactly "None", so any other
@@ -614,6 +675,9 @@ function M.set_config(params)
       end
       local def = build.configTab.defaultState and build.configTab.defaultState[k]
       local dt = type(def)
+      local lv, lerr = resolveListValue(k, v)
+      if lerr then return nil, lerr end
+      v = lv
       if dt == 'boolean' then
         input[k] = (v == true or v == 'true' or v == 1)
       elseif dt == 'number' then
