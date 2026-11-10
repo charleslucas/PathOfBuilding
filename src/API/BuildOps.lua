@@ -92,6 +92,21 @@ function M.get_tree()
 end
 
 -- Set tree allocation from parameters
+-- Mastery selections the caller supplies, merged OVER the spec's existing ones, with ids
+-- and effects coerced to numbers (JSON object keys arrive as strings). Ported in spirit
+-- from pob-mcp upstream 7d6557c: ImportFromNodeList wipes masterySelections and drops any
+-- Mastery without a selection, so a partial map used to silently clear the rest.
+local function merge_mastery(spec, extra)
+  local merged = {}
+  for k, v in pairs(spec.masterySelections or {}) do merged[k] = v end
+  if type(extra) == 'table' then
+    for nodeId, effectId in pairs(extra) do
+      merged[tonumber(nodeId) or nodeId] = tonumber(effectId) or effectId
+    end
+  end
+  return merged
+end
+
 -- params: { classId, ascendClassId, secondaryAscendClassId?, nodes:[int], masteryEffects?:{[id]=effect}, treeVersion? }
 function M.set_tree(params)
   if not build or not build.spec then
@@ -109,13 +124,10 @@ function M.set_tree(params)
       table.insert(nodes, tonumber(v))
     end
   end
-  local mastery = params.masteryEffects or {}
-  -- Bug 1: Preserve existing mastery selections when none are provided by the caller.
-  -- ImportFromNodeList wipes masterySelections before setting them; if the caller omits
-  -- masteryEffects, passing {} would silently clear all mastery choices.
-  if next(mastery) == nil and build.spec.masterySelections then
-    mastery = build.spec.masterySelections
-  end
+  -- Bug 1: Preserve existing mastery selections. ImportFromNodeList wipes masterySelections
+  -- before setting them, so the caller's map is merged over the existing one (a partial map
+  -- used to clear every mastery it didn't mention).
+  local mastery = merge_mastery(build.spec, params.masteryEffects)
   -- Bug 2c: Preserve existing hashOverrides (tattoo/node replacement data).
   -- Passing {} drops all node overrides that were loaded from the build XML.
   local hashOverrides = (build.spec.hashOverrides ~= nil) and build.spec.hashOverrides or {}
@@ -296,6 +308,8 @@ end
 --   autoPathedNodes - intermediates PoB pulled in to maintain connectivity
 --   droppedNodes - requested adds that could NOT be allocated (no path / bad ID)
 --   skippedAscendancyNodes - adds refused because they'd exceed the 8-point ascendancy cap
+--   masteryNoEffect - requested Mastery nodes refused because no effect was chosen
+--                     (params.masteryEffects = { [nodeId] = effectId } allocates one)
 function M.update_tree_delta(params)
   if not build or not build.spec then return nil, 'build/spec not initialized' end
   local spec = build.spec
@@ -305,6 +319,18 @@ function M.update_tree_delta(params)
 
   local before = {}
   for _, id in ipairs(current.nodes) do before[tonumber(id)] = true end
+
+  local masteryReq = {}
+  if type(params.masteryEffects) == 'table' then
+    for nodeId, effectId in pairs(params.masteryEffects) do
+      local n, e = tonumber(nodeId), tonumber(effectId)
+      if n and e then masteryReq[n] = e end
+    end
+  end
+  -- Effect changes on masteries that are already allocated apply directly.
+  for n, e in pairs(masteryReq) do
+    if before[n] then spec.masterySelections[n] = e end
+  end
 
   -- Phase 1: removals, via ImportFromNodeList (rebuilding the list is the only way to
   -- deallocate, and it correctly prunes anything orphaned by the removal).
@@ -318,7 +344,7 @@ function M.update_tree_delta(params)
       if not removeReq[id] then table.insert(keep, id) end
     end
     table.sort(keep)
-    local mastery  = current.masteryEffects or {}
+    local mastery  = merge_mastery(spec, nil)
     local classId  = params.classId or current.classId or 0
     local ascendId = params.ascendClassId or current.ascendClassId or 0
     local secId    = params.secondaryAscendClassId or current.secondaryAscendClassId or 0
@@ -330,7 +356,7 @@ function M.update_tree_delta(params)
   end
 
   -- Phase 2: additions, via PoB's pathfinder.
-  local addReq, dropped, skippedAsc = {}, {}, {}
+  local addReq, dropped, skippedAsc, masteryNoEffect = {}, {}, {}, {}
   if type(params.addNodes) == 'table' then
     for _, id in ipairs(params.addNodes) do
       local n = tonumber(id)
@@ -355,10 +381,20 @@ function M.update_tree_delta(params)
         table.insert(dropped, id)
       elseif not isAllocated() then
         local _, ascUsed = spec:CountAllocNodes()
+        local nodeId = tonumber(node.id) or id
+        local isMastery = node.type == "Mastery"
         if node.ascendancyName and (ascUsed or 0) >= 8 then
           table.insert(skippedAsc, id)
+        elseif isMastery and not masteryReq[nodeId] and not spec.masterySelections[nodeId] then
+          -- Allocating it would spend a point on a node that grants nothing.
+          table.insert(masteryNoEffect, id)
         else
           spec:AllocNode(node)
+          -- The selection must be set AFTER AllocNode: BuildAllDependsAndPaths clears the
+          -- selection of any mastery that isn't allocated yet.
+          if isMastery and masteryReq[nodeId] and isAllocated() then
+            spec.masterySelections[nodeId] = masteryReq[nodeId]
+          end
           -- AllocNode is a no-op when node.path is nil (unreachable).
           if not isAllocated() then
             table.insert(dropped, id)
@@ -387,7 +423,7 @@ function M.update_tree_delta(params)
     if not after[id] then table.insert(removed, id) end
   end
   table.sort(added); table.sort(removed); table.sort(autoPathed)
-  table.sort(dropped); table.sort(skippedAsc)
+  table.sort(dropped); table.sort(skippedAsc); table.sort(masteryNoEffect)
 
   return {
     added = added,
@@ -395,6 +431,7 @@ function M.update_tree_delta(params)
     autoPathedNodes = autoPathed,
     droppedNodes = dropped,
     skippedAscendancyNodes = skippedAsc,
+    masteryNoEffect = masteryNoEffect,
   }
 end
 

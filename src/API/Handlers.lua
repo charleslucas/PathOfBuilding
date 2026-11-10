@@ -224,6 +224,7 @@ handlers.update_tree_delta = function(params)
     autoPathedNodes = res.autoPathedNodes,
     droppedNodes = res.droppedNodes,
     skippedAscendancyNodes = res.skippedAscendancyNodes,
+    masteryNoEffect = res.masteryNoEffect,
   }
 end
 
