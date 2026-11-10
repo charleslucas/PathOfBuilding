@@ -406,6 +406,12 @@ handlers.get_mastery_options = function(params)
   return { ok = true, result = res }
 end
 
+handlers.get_ailments = function(params)
+  local res, err = BuildOps.get_ailments()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.set_socket_group_enabled = function(params)
   local res, err = BuildOps.set_socket_group_enabled(params or {})
   if not res then return { ok = false, error = err or 'failed' } end
