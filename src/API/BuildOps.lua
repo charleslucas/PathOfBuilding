@@ -436,6 +436,24 @@ function M.update_tree_delta(params)
 end
 
 
+-- Can this build spend a point on `node`? spec.nodes holds the WHOLE tree, including every
+-- other class's ascendancy, class starts and cluster proxies; simulating one of those is not
+-- a meaningful what-if and can take the calculator down. Masteries are allocatable only with
+-- an effect, so callers that don't supply one pass allowMastery=false.
+-- (Ported from pob-mcp upstream b36a9b4.)
+function M.is_allocatable(node, allowMastery)
+  if type(node) ~= 'table' then return false end
+  if (node.type == 'Mastery' or node.isMastery) and not allowMastery then return false end
+  if node.type == 'ClassStart' or node.classStartIndex then return false end
+  if node.isProxy then return false end
+  local asc = node.ascendancyName
+  if asc and asc ~= '' then
+    local own = build and build.spec and build.spec.curAscendClassName
+    if not own or own == '' or asc ~= own then return false end
+  end
+  return true
+end
+
 -- Calculate what-if scenario without persisting changes
 -- params: { addNodes?: number[], removeNodes?: number[], masteryEffects?: {[id]=effectId}, useFullDPS?: boolean }
 function M.calc_with(params)
@@ -446,7 +464,7 @@ function M.calc_with(params)
   if params and type(params.addNodes) == 'table' then
     for _, id in ipairs(params.addNodes) do
       local n = build.spec.nodes[tonumber(id)] or build.spec.nodes[tostring(id)]
-      if n and not build.spec.allocNodes[n.id] then table.insert(toAdd, n) end
+      if n and not build.spec.allocNodes[n.id] and M.is_allocatable(n, true) then table.insert(toAdd, n) end
     end
   end
   if params and type(params.removeNodes) == 'table' then
@@ -1458,6 +1476,9 @@ function M.search_nodes(params)
         orbit = node.orbit,
         orbitIndex = node.orbitIndex,
         ascendancyName = node.ascendancyName,
+        -- Blight notables sit off the tree and are reached by anointing, not by
+        -- spending a point; callers need to tell them apart from real nodes.
+        isBlighted = node.isBlighted == true,
       })
       count = count + 1
     end
