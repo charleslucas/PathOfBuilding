@@ -483,49 +483,44 @@ function M.calc_with(params)
     end
   end
 
-  -- Handle mastery effects by temporarily patching node modLists
-  -- (calcs.initEnv reads allocNode.modList directly; it does not handle override.masteryEffects)
-  if params and type(params.masteryEffects) == 'table' and not params.addNodes and not params.removeNodes then
-    local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
-    local spec = build.spec
-    local tree = spec and spec.tree
-    -- Patch each affected mastery node
-    local savedState = {}
+  -- Mastery effects: calcs.initEnv reads each node's modList directly and ignores
+  -- override.masteryEffects, so patch the mastery node's sd/modList for the duration
+  -- of the calc. Works for an allocated mastery (effect swap) and for a mastery node
+  -- being added in this same call (addNodes + its effect). Restored before returning.
+  local spec = build.spec
+  local tree = spec and spec.tree
+  local savedState = {}
+  local function restoreMasteries()
+    for node, saved in pairs(savedState) do
+      node.sd = saved.sd
+      node.modList = saved.modList
+    end
+  end
+  if params and type(params.masteryEffects) == 'table' then
+    local adding = {}
+    for _, n in ipairs(toAdd) do adding[n.id] = true end
     for k, v in pairs(params.masteryEffects) do
       local nodeId   = tonumber(k)
       local effectId = tonumber(v)
       if nodeId and effectId then
-        local node   = spec.allocNodes and spec.allocNodes[nodeId]
+        local node = (spec.allocNodes and spec.allocNodes[nodeId]) or (adding[nodeId] and spec.nodes[nodeId]) or nil
         local effect = tree and tree.masteryEffects and tree.masteryEffects[effectId]
-        if node and effect then
-          savedState[nodeId] = { sd = node.sd, modList = node.modList }
+        if node and effect and not savedState[node] then
+          savedState[node] = { sd = node.sd, modList = node.modList }
           node.sd = effect.sd
-          tree:ProcessStats(node)  -- rebuilds node.modList from new sd
+          tree:ProcessStats(node)  -- rebuilds node.modList from the new sd
         end
       end
     end
-    local savedViewMode = build.viewMode
-    build.viewMode = "CALCULATOR"
-    local out = calcFunc({}, false)
-    build.viewMode = savedViewMode
-    -- Restore patched nodes
-    for nodeId, saved in pairs(savedState) do
-      local node = spec.allocNodes and spec.allocNodes[nodeId]
-      if node then
-        node.sd      = saved.sd
-        node.modList = saved.modList
-      end
-    end
-    return out, baseOut
-  end
-
-  -- No node changes: return base calc directly (no simulation needed)
-  if #toAdd == 0 and #toRemove == 0 then
-    local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
-    return baseOut, baseOut
   end
 
   local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
+
+  -- Nothing to simulate: return the base calc directly
+  if #toAdd == 0 and #toRemove == 0 and next(savedState) == nil then
+    return baseOut, baseOut
+  end
+
   local override = {}
   if #toAdd > 0 then
     override.addNodes = {}
@@ -535,16 +530,15 @@ function M.calc_with(params)
     override.removeNodes = {}
     for _, n in ipairs(toRemove) do override.removeNodes[n] = true end
   end
-  if params and type(params.masteryEffects) == 'table' then
-    override.masteryEffects = params.masteryEffects
-  end
 
   -- Bypass calcFullDPS which runs unconditionally when viewMode=="TREE",
   -- making each call 30+ seconds. calcs.perform correctly sets CombinedDPS.
   local savedViewMode = build.viewMode
   build.viewMode = "CALCULATOR"
-  local out = calcFunc(override, false)
+  local ok, out = pcall(calcFunc, override, false)
   build.viewMode = savedViewMode
+  restoreMasteries()
+  if not ok then return nil, 'calc_with failed: ' .. tostring(out) end
   return out, baseOut
 end
 
@@ -1474,7 +1468,8 @@ function M.search_nodes(params)
 
   -- Search through all nodes
   for id, node in pairs(build.spec.nodes) do
-    if count >= maxResults then break end
+    -- Collect every match, then sort and truncate: stopping the unordered pairs()
+    -- walk at maxResults returned an arbitrary subset that changed between loads.
 
     -- Skip if already allocated and we don't want allocated nodes
     if not includeAllocated and allocatedSet[id] then
@@ -1567,8 +1562,12 @@ function M.search_nodes(params)
     if aOrder ~= bOrder then
       return aOrder < bOrder
     end
-    return (a.name or '') < (b.name or '')
+    if (a.name or '') ~= (b.name or '') then
+      return (a.name or '') < (b.name or '')
+    end
+    return (tonumber(a.id) or 0) < (tonumber(b.id) or 0)
   end)
+  while #results > maxResults do table.remove(results) end
 
   return { nodes = results, count = #results }
 end
@@ -1814,6 +1813,8 @@ function M.get_mastery_options()
       end
     end
   end
+  -- pairs() order is not stable across loads; list masteries by node id.
+  table.sort(result, function(a, b) return (tonumber(a.nodeId) or 0) < (tonumber(b.nodeId) or 0) end)
   return { masteries = result }
 end
 
@@ -2069,7 +2070,11 @@ function M.evaluate_anoint_candidates(params)
   build.itemsTab.displayItem     = savedDisplayItem
   build.itemsTab.anointEnchantSlot = savedAnointSlot
 
-  table.sort(candidates, function(a, b) return a.score > b.score end)
+  -- Ties (common: many notables add nothing) keep a fixed order by node id.
+  table.sort(candidates, function(a, b)
+    if a.score ~= b.score then return a.score > b.score end
+    return (tonumber(a.nodeId) or 0) < (tonumber(b.nodeId) or 0)
+  end)
 
   local top = {}
   for i = 1, math.min(limit, #candidates) do top[i] = candidates[i] end
