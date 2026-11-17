@@ -116,6 +116,22 @@ local function merge_mastery(spec, extra)
   return merged
 end
 
+-- Cluster-jewel nodes (ids >= 65536) are re-allocated on every ImportFromNodeList from
+-- spec.allocExtendedNodes, so a removed cluster node silently came back (and the tree
+-- ended up a point over budget). Keep only the cluster nodes in the requested list.
+-- get_tree includes allocated cluster nodes, so round trips keep them; a caller that
+-- sends only base-tree ids drops them. (Ported from upstream pob-mcp #39.)
+local function prune_extended_nodes(spec, nodes)
+  if type(spec.allocExtendedNodes) ~= 'table' or type(nodes) ~= 'table' then return end
+  local wanted = {}
+  for _, id in ipairs(nodes) do wanted[tonumber(id)] = true end
+  local keep = {}
+  for _, id in ipairs(spec.allocExtendedNodes) do
+    if wanted[tonumber(id)] then table.insert(keep, id) end
+  end
+  spec.allocExtendedNodes = keep
+end
+
 -- params: { classId, ascendClassId, secondaryAscendClassId?, nodes:[int], masteryEffects?:{[id]=effect}, treeVersion? }
 function M.set_tree(params)
   if not build or not build.spec then
@@ -149,6 +165,7 @@ function M.set_tree(params)
   -- in `className`, which is truthy, so PoB did classNameMap[<number>] -> nil and then
   -- SelectClass(nil) -> "attempt to index local 'class' (a nil value)". Pass nil for
   -- className so the numeric classId/ascendClassId path is used.
+  prune_extended_nodes(build.spec, nodes)
   build.spec:ImportFromNodeList(nil, classId, ascendId, secondaryId, nodes, hashOverrides, mastery, treeVersion)
   -- Rebuild calcs to reflect changes
   M.get_main_output()
@@ -361,6 +378,7 @@ function M.update_tree_delta(params)
     -- Bug 2c: Preserve existing hashOverrides (tattoo/node overrides loaded from build XML).
     local hashOverrides = (spec.hashOverrides ~= nil) and spec.hashOverrides or {}
     -- See the signature note in set_tree: PoB 3.29 prepended a `className` parameter.
+    prune_extended_nodes(spec, keep)
     spec:ImportFromNodeList(nil, tonumber(classId) or 0, tonumber(ascendId) or 0, tonumber(secId) or 0, keep, hashOverrides, mastery, tv)
   end
 
