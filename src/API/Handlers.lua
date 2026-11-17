@@ -70,6 +70,53 @@ local function version_meta()
   }
 end
 
+-- PoB writes into the shared data.skills tables while it loads and calculates a
+-- build, so every later build in this process inherited those writes (ported from
+-- upstream pob-mcp #57):
+--  * SkillsTab sets `levels[level].cost = {}` for triggered skills, zeroing that
+--    level's cost for every later build (a ManaCost went from 52 to 0).
+--  * CalcSetup flags item-granted supports `grantedEffect.fromItem = true`; CalcTools
+--    then stops that support gem supporting ordinary skills in later builds.
+--  * Data.lua fills `statMap` lazily; processMod may set `hasGlobalEffect` on the way.
+-- Each grantedEffect, its statMap and level tables are snapshotted one level deep
+-- when this file loads (end of Main:Init, before any build has calculated) and put
+-- back before every API-driven build load / new build.
+local sharedSnapshot, sharedCounts = {}, {}
+local function snapshotTable(t)
+  local copy, n = {}, 0
+  for k, v in pairs(t) do copy[k] = v; n = n + 1 end
+  sharedSnapshot[t], sharedCounts[t] = copy, n
+end
+if type(data) == 'table' and type(data.skills) == 'table' then
+  for _, grantedEffect in pairs(data.skills) do
+    if type(grantedEffect) == 'table' then
+      snapshotTable(grantedEffect)
+      if type(grantedEffect.statMap) == 'table' then snapshotTable(grantedEffect.statMap) end
+      if type(grantedEffect.levels) == 'table' then
+        for _, levelData in pairs(grantedEffect.levels) do
+          if type(levelData) == 'table' then snapshotTable(levelData) end
+        end
+      end
+    end
+  end
+end
+local function restoreSharedData()
+  for t, copy in pairs(sharedSnapshot) do
+    -- rawget/rawset: statMap's __index would otherwise create the entry
+    local n, dirty = 0, false
+    for k, v in pairs(t) do
+      n = n + 1
+      if copy[k] ~= v then rawset(t, k, copy[k]); dirty = true end
+    end
+    -- Keys PoB removed only show up as a missing count or next to a change
+    if dirty or n ~= sharedCounts[t] then
+      for k, v in pairs(copy) do
+        if rawget(t, k) ~= v then rawset(t, k, v) end
+      end
+    end
+  end
+end
+
 local handlers = {}
 
 handlers.ping = function(params)
@@ -85,6 +132,8 @@ handlers.new_build = function(params)
     return { ok = false, error = 'headless wrapper not initialized' }
   end
   _G.newBuild()
+  -- A blank build still calculates, so restore after it, not before.
+  restoreSharedData()
   return { ok = true }
 end
 
@@ -96,6 +145,7 @@ handlers.load_build_xml = function(params)
   if not _G.loadBuildFromXML then
     return { ok = false, error = 'headless wrapper not initialized' }
   end
+  restoreSharedData()
   _G.loadBuildFromXML(params.xml, name)
   return { ok = true, build_id = 1 }
 end
@@ -164,6 +214,9 @@ handlers.export_build_xml = function(params)
 end
 
 handlers.open_build_xml = function(params)
+  -- GUI mode: SetMode loads the build on the next frame, so restoring now is
+  -- before it calculates.
+  restoreSharedData()
   local res, err = BuildOps.open_build_xml(params or {})
   if not res then return { ok = false, error = err } end
   return { ok = true }
