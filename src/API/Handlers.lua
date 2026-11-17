@@ -374,6 +374,12 @@ local function slimCalcOutput(out, extraFields)
   return slim
 end
 
+handlers.get_timeless_jewels = function(params)
+  local res, err = BuildOps.get_timeless_jewels()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.export_full_stats = function(params)
   local res, err = BuildOps.export_full_stats()
   if not res then return { ok = false, error = err } end
