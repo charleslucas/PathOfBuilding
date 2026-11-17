@@ -412,10 +412,10 @@ handlers.get_config = function(params)
 end
 
 handlers.set_config = function(params)
-  local ok2, err = BuildOps.set_config(params or {})
-  if not ok2 then return { ok = false, error = err } end
+  local res, err = BuildOps.set_config(params or {})
+  if not res then return { ok = false, error = err } end
   local cfg = BuildOps.get_config()
-  return { ok = true, config = cfg }
+  return { ok = true, config = cfg, applied = res.applied, rejected = res.rejected }
 end
 
 handlers.get_notes = function(params)

@@ -929,8 +929,56 @@ function M.set_config(params)
   -- `varControls` is keyed by every option's var name; `defaultState` carries a value of the
   -- option's expected type (check->boolean, count->number, list/string->string), which is how
   -- we coerce without duplicating ConfigOptions' type table.
-  local SPECIAL = { bandit = true, pantheonMajorGod = true, pantheonMinorGod = true, enemyLevel = true }
-  local applied = {}
+  local SPECIAL = { bandit = true, pantheonMajorGod = true, pantheonMinorGod = true, enemyLevel = true, customMods = true }
+  local applied, rejected = {}, {}
+
+  -- Custom Modifiers (ported from upstream pob-mcp #47). Current PoB keeps them as
+  -- named groups per config set (configSet.customModsList); older PoB reads
+  -- input.customMods. Write a dedicated "pob-mcp" group so the user's own groups
+  -- are never overwritten (an empty string removes ours), and report lines PoB
+  -- cannot parse instead of silently dropping them.
+  if params.customMods ~= nil then
+    local value = params.customMods
+    if type(value) ~= 'string' then
+      return nil, 'customMods expects a string of modifier lines'
+    end
+    local tab = build.configTab
+    local set = tab.configSets and tab.configSets[tab.activeConfigSetId]
+    if set and set.customModsList then
+      local block
+      for i, blk in ipairs(set.customModsList) do
+        if blk.title == 'pob-mcp' then
+          block = blk
+          if value == '' then table.remove(set.customModsList, i) end
+          break
+        end
+      end
+      if value ~= '' then
+        if not block then
+          block = { title = 'pob-mcp', enabled = true, text = '' }
+          table.insert(set.customModsList, block)
+        end
+        block.text, block.enabled = value, true
+      end
+      if #set.customModsList == 0 then
+        table.insert(set.customModsList, { title = 'Default', enabled = true, text = '' })
+      end
+      if tab.UpdateCustomModsControls then pcall(function() tab:UpdateCustomModsControls() end) end
+    else
+      input.customMods = value
+    end
+    local unparsed = {}
+    for line in value:gmatch('([^\n]*)\n?') do
+      local stripped = line:match('^%s*(.-)%s*$')
+      if stripped ~= '' then
+        local mods, extra = modLib.parseMod(stripped)
+        if not mods or extra then table.insert(unparsed, stripped) end
+      end
+    end
+    applied.customMods = value
+    if #unparsed > 0 then rejected.customModsUnparsed = unparsed end
+    changed = true
+  end
   for k, v in pairs(params) do
     if not SPECIAL[k] then
       local known = build.configTab.varControls and build.configTab.varControls[k]
@@ -939,6 +987,13 @@ function M.set_config(params)
       end
       local def = build.configTab.defaultState and build.configTab.defaultState[k]
       local dt = type(def)
+      if v == '__unset__' then
+        -- Clear an option back to PoB's default (ported from upstream pob-mcp #42).
+        input[k] = nil
+        applied[k] = '__unset__'
+        changed = true
+        goto continue
+      end
       local lv, lerr = resolveListValue(k, v)
       if lerr then return nil, lerr end
       v = lv
@@ -956,6 +1011,7 @@ function M.set_config(params)
       applied[k] = input[k]
       changed = true
     end
+    ::continue::
   end
 
   if changed then
@@ -966,7 +1022,7 @@ function M.set_config(params)
     build.buildFlag = true
   end
   M.get_main_output()
-  return { applied = applied }
+  return { applied = applied, rejected = next(rejected) and rejected or nil }
 end
 
 
