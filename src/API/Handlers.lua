@@ -374,6 +374,12 @@ local function slimCalcOutput(out, extraFields)
   return slim
 end
 
+handlers.export_full_stats = function(params)
+  local res, err = BuildOps.export_full_stats()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, stats = res }
+end
+
 handlers.parse_item = function(params)
   local res, err = BuildOps.parse_item(params or {})
   if not res then return { ok = false, error = err } end

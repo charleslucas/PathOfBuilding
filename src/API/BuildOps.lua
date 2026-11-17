@@ -35,6 +35,43 @@ end
 
 -- Export a subset of useful stats from main output
 -- If fields is provided, only export those keys (when present)
+local function numericStats(tbl)
+  local out = {}
+  for k, v in pairs(tbl) do
+    if type(k) == 'string' and type(v) == 'number' and v == v and v ~= math.huge and v ~= -math.huge then
+      out[k] = v
+    end
+  end
+  return out
+end
+
+-- Every finite numeric key of PoB's main output (curated stat sets miss most of
+-- them), plus per-skill full-DPS rows and the minion output. (Ported from upstream
+-- pob-mcp #48.)
+function M.export_full_stats()
+  local output, err = M.get_main_output()
+  if not output then return nil, err end
+  local result = numericStats(output)
+  if type(output.SkillDPS) == 'table' then
+    local skills = {}
+    for _, row in ipairs(output.SkillDPS) do
+      if type(row) == 'table' and type(row.dps) == 'number' and row.dps == row.dps and row.dps ~= math.huge then
+        table.insert(skills, { name = tostring(row.name), dps = row.dps, count = tonumber(row.count) })
+      end
+    end
+    result._skillDPS = skills
+  end
+  if type(output.Minion) == 'table' then
+    result._minion = numericStats(output.Minion)
+  end
+  result._meta = {
+    treeVersion = build and build.spec and build.spec.treeVersion and tostring(build.spec.treeVersion) or nil,
+    level = build and tonumber(build.characterLevel) or nil,
+    buildName = build and build.buildName and tostring(build.buildName) or nil,
+  }
+  return result
+end
+
 function M.export_stats(fields)
   local output, err = M.get_main_output()
   if not output then
@@ -57,8 +94,9 @@ function M.export_stats(fields)
   end
   -- include some metadata if available
   result._meta = result._meta or {}
-  if build and build.targetVersion then
-    result._meta.treeVersion = tostring(build.targetVersion)
+  -- build.targetVersion is PoB's game-version setting ("3_0" = PoE 1), not the tree.
+  if build and build.spec and build.spec.treeVersion then
+    result._meta.treeVersion = tostring(build.spec.treeVersion)
   end
   if build and build.characterLevel then
     result._meta.level = tonumber(build.characterLevel)
@@ -390,7 +428,7 @@ function M.get_build_info()
     level = build.characterLevel,
     className = className,
     ascendClassName = ascendClassName,
-    treeVersion = build.targetVersion or (spec and spec.treeVersion) or nil,
+    treeVersion = (spec and spec.treeVersion) or nil,  -- not build.targetVersion: that is the game version ("3_0")
   }
   return info
 end
