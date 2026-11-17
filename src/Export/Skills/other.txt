@@ -3,8 +3,7 @@
 -- Other active skills
 -- Skill data (c) Grinding Gear Games
 --
-local skills, mod, flag, skill = ...
-
+return function(skills, mod, flag, skill)
 #skill RepeatingShockwave
 #flags spell area
 	fromItem = true,
@@ -77,6 +76,42 @@ local skills, mod, flag, skill = ...
 	fromTree = true,
 #mods
 
+#skill AspectOfArakaali
+#flags cast
+	fromItem = true,
+	statMap = {
+		["active_skill_buff_life_recovery_rate_+%_per_wither_on_self_to_grant"] = {
+			mod("LifeRecoveryRate", "INC", nil, 0, 0, { type = "Multiplier", var = "WitheredStack", limit = 15 }, { type = "GlobalEffect", effectType = "Buff" }),
+		},
+	},
+#baseMod flag("Condition:CanWither", { type = "GlobalEffect", effectType = "Buff" })
+#baseMod flag("Condition:CanBeWithered", { type = "GlobalEffect", effectType = "Buff" })
+#mods
+
+#skill AspectOfLunaris
+#flags cast duration
+	fromItem = true,
+	statMap = {
+		["lunaris_aspect_skill_physical_damage_taken_+%_final_per_phys_rebuff"] = {
+			mod("PhysicalDamageTaken", "MORE", nil, 0, 0, { type = "Multiplier", var = "LunarProtection", limit = 8 }, { type = "GlobalEffect", effectType = "Buff", effectName = "Lunar Protection" }),
+		},
+		["lunaris_aspect_skill_elemental_damage_taken_+%_final_per_ele_rebuff"] = {
+			mod("ElementalDamageTaken", "MORE", nil, 0, 0, { type = "Multiplier", var = "LunarResistance", limit = 8 }, { type = "GlobalEffect", effectType = "Buff", effectName = "Lunar Resistance" }),
+		},
+	},
+#mods
+
+#skill AspectOfSolaris
+#flags cast duration
+	fromItem = true,
+	statMap = {
+		["solaris_aspect_debuff_exposure_effect_+%_to_apply"] = {
+			mod("ExposureEffect", "INC", nil, 0, 0, { type = "Multiplier", var = "SunscaldStack", limit = 5 }, { type = "Condition", var = "Effective" }, { type = "GlobalEffect", effectType = "Buff" }),
+		},
+	},
+#baseMod mod("EnemyModifier", "LIST", { mod = mod("FireExposure", "BASE", -10) }, 0, 0, { type = "Condition", var = "Effective" }, { type = "GlobalEffect", effectType = "Buff" })
+#mods
+
 #skill AspectOfTheAvian
 #flags cast duration
 	fromItem = true,
@@ -92,6 +127,19 @@ local skills, mod, flag, skill = ...
 		},
 		["minion_movement_speed_+%"] = {
 			mod("MinionModifier", "LIST", { mod = mod("MovementSpeed", "INC", nil) }, 0, 0, { type = "GlobalEffect", effectType = "Buff", effectName = "Avian's Flight", effectCond = "AviansFlightActive" }),
+		},
+	},
+#mods
+
+#skill AspectOfTheBrineKing
+#flags cast guaranteedChill
+	fromItem = true,
+	statMap = {
+		["active_skill_buff_chill_effect_+%_to_grant"] = {
+			mod("EnemyChillEffect", "INC", nil, 0, 0, { type = "GlobalEffect", effectType = "Buff" }),
+		},
+		["cold_penetration_%_vs_chilled_enemies"] = {
+			mod("ColdPenetration", "BASE", nil, 0, 0, { type = "ActorCondition", actor = "enemy", var = "Chilled" }, { type = "GlobalEffect", effectType = "Buff" }),
 		},
 	},
 #mods
@@ -649,6 +697,16 @@ local skills, mod, flag, skill = ...
 	fromItem = true,
 #mods
 
+#skill SupportUniqueSuspendInTimeCanUse Temporal Mirage
+	fromItem = true,
+	statMap = {
+		["skill_can_be_used_by_temporal_mirage"] = {
+			skill("triggeredByTemporalMirage", true),
+		},
+	},
+#baseMod mod("Damage", "MORE", -30)
+#mods
+
 #skill LightningAegis
 #flags spell
 	fromItem = true,
@@ -711,6 +769,17 @@ local skills, mod, flag, skill = ...
 #baseMod flag("CannotSplit")
 #mods
 
+#skill TriggeredMoonfall
+#flags attack projectile area
+	fromItem = true,
+	statMap = {
+		["attack_trigger_on_melee_critical_hit_%"] = {
+			skill("triggeredByCovetousDark", true),
+			skill("triggerOnCrit", true),
+		},
+	},
+#mods
+
 #skill PenanceMark
 #flags spell curse duration mark
 	fromItem = true,
@@ -756,7 +825,7 @@ local skills, mod, flag, skill = ...
 			mod("BeidatAdditionalCascades", "BASE", nil),
 		},
 		["pact_skill_damage_+%_final_with_hits_and_ailments_to_grant"] = {
-			mod("BeidatPactDamage", "LIST", { mod = mod("Damage", "MORE", nil, ModFlag.Spell, bit.bor(KeywordFlag.Hit, KeywordFlag.Ailment)) }),
+			mod("BeidatPactDamage", "LIST", { mod = mod("Damage", "MORE", nil, 0, bit.bor(KeywordFlag.Hit, KeywordFlag.Ailment)) }),
 		},
 	},
 #mods
@@ -1573,6 +1642,30 @@ local skills, mod, flag, skill = ...
 	fromItem = true,
 #mods
 
+#skill GrimBonfire Witchhunter's Pyre
+#flags spell projectile area
+	fromItem = true,
+	statMap = {
+		["grim_bonfire_additional_projectile_chance_per_debuff_on_target"] = {
+			mod("DPS", "MORE", nil, 0, 0, { type = "Multiplier", var = "WitchhuntersPyreAdditionalBurningDebuff" }),
+		},
+	},
+#mods
+
+#skill BloodFlower Goreblossom
+#flags spell area duration
+	fromItem = true,
+	statMap = {
+		["blood_flower_physical_dot_multiplier_+_to_grant"] = {
+			mod("PhysicalDotMultiplier", "BASE", nil, 0, 0, { type = "Multiplier", var = "GoreblossomBloom", limitVar = "GoreblossomMaxBlooms" }, { type = "GlobalEffect", effectType = "Buff" }),
+		},
+		["blood_flower_maximum_flowers"] = {
+			mod("Multiplier:GoreblossomBloom", "BASE", nil, 0, 0, { type = "GlobalEffect", effectType = "Buff", unscalable = true }),
+			mod("Multiplier:GoreblossomMaxBlooms", "BASE", nil, 0, 0, { type = "GlobalEffect", effectType = "Buff", unscalable = true }),
+		},
+	},
+#mods
+
 #skill SupportTriggerFireSpellOnHit
 	fromItem = true,
 	statMap = {
@@ -1670,3 +1763,5 @@ skills["EnemyExplode"] = {
 		[1] = { damageEffectiveness = 1, baseMultiplier = 1, levelRequirement = 1, }
 	}
 }
+
+end

@@ -7,6 +7,167 @@ describe("TestSkills", function()
 		-- newBuild() takes care of resetting everything in setup()
 	end)
 
+	local function gemTooltipText(gem)
+		local tooltip = new("Tooltip"):Tooltip()
+		require("Classes.GemTooltip").AddGemTooltip(tooltip, build, gem)
+		local lines = {}
+		for _, line in ipairs(tooltip.lines) do
+			table.insert(lines, line.text)
+		end
+		return table.concat(lines, "\n")
+	end
+
+	it("separates socketed and global modifiers from the same item on a support gem", function()
+		build.itemsTab:CreateDisplayItemFromRaw("Rarity: RARE\nTest Helmet\nHubris Circlet\nSockets: B-B\nImplicits: 0\n+2 to Level of Socketed Gems\n+10% to Quality of Socketed Gems\n+1 to Level of all Support Gems\n+3% to Quality of all Support Gems")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Slot: Helmet\nFireball 20/0  1\nControlled Destruction 20/5  1\n")
+		runCallback("OnFrame")
+
+		local gem = build.skillsTab.socketGroupList[1].gemList[2]
+		assert.are.equals(23, gem.displayEffect.level)
+		assert.are.equals(28, gem.displayEffect.quality)
+		local text = gemTooltipText(gem)
+		assert.is_truthy(text:find("+2 Levels from Item", 1, true))
+		assert.is_truthy(text:find("+1 Levels from Global Modifiers", 1, true))
+		assert.is_truthy(text:find("+10% Quality from Item", 1, true))
+		assert.is_truthy(text:find("+3% Quality from Global Modifiers", 1, true))
+		assert.is_truthy(text:find("+10% Quality from Socket Colour", 1, true))
+		assert.is_nil(text:find("from Supports", 1, true))
+	end)
+
+	it("includes negative item and global modifiers in gem tooltips and breakdowns", function()
+		build.itemsTab:CreateDisplayItemFromRaw("Rarity: RARE\nTest Helmet\nHubris Circlet\nSockets: G\nImplicits: 0\n-5 to Level of Socketed Gems\n-10% to Quality of Socketed Gems")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Slot: Helmet\nFireball 20/20  1\n")
+		build.configTab.input.customMods = "-1 to Level of all Spell Skill Gems\n-2% to Quality of all Skill Gems"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(14, build.calcsTab.mainOutput.GemLevel)
+		assert.are.equals(8, build.calcsTab.mainOutput.GemQuality)
+		local text = gemTooltipText(build.skillsTab.socketGroupList[1].gemList[1])
+		assert.is_truthy(text:find("-5 Levels from Item", 1, true))
+		assert.is_truthy(text:find("-1 Levels from Global Modifiers", 1, true))
+		assert.is_truthy(text:find("-10% Quality from Item", 1, true))
+		assert.is_truthy(text:find("-2% Quality from Global Modifiers", 1, true))
+		local breakdown = build.calcsTab.calcsEnv.player.breakdown
+		assert.is_truthy(table.concat(breakdown.GemLevel, "\n"):find("- 5 ^8(level from items)", 1, true))
+		assert.is_truthy(table.concat(breakdown.GemLevel, "\n"):find("- 1 ^8(level from global modifiers)", 1, true))
+		assert.is_truthy(table.concat(breakdown.GemQuality, "\n"):find("- 10 ^8(quality from items)", 1, true))
+		assert.is_truthy(table.concat(breakdown.GemQuality, "\n"):find("- 2 ^8(quality from global modifiers)", 1, true))
+	end)
+
+	it("shows the applied level cap without losing the source bonuses", function()
+		build.skillsTab:PasteSocketGroup("Fireball 20/0  1\n")
+		build.configTab.input.customMods = "+30 to Level of all Spell Skill Gems"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(40, build.calcsTab.mainEnv.player.mainSkill.activeEffect.level)
+		assert.are.equals(40, build.calcsTab.mainOutput.GemLevel)
+		local text = gemTooltipText(build.skillsTab.socketGroupList[1].gemList[1])
+		assert.is_truthy(text:find("+30 Levels from Global Modifiers", 1, true))
+		assert.is_truthy(text:find("Limited to Level 40", 1, true))
+		local breakdown = table.concat(build.calcsTab.calcsEnv.player.breakdown.GemLevel, "\n")
+		assert.is_truthy(breakdown:find("+ 30 ^8(level from global modifiers)", 1, true))
+		assert.is_truthy(breakdown:find("Limited to Level 40", 1, true))
+		assert.is_truthy(breakdown:find("= 40", 1, true))
+	end)
+
+	it("includes item and global bonuses in gem totals alongside supports and socket quality", function()
+		build.itemsTab:CreateDisplayItemFromRaw("Rarity: RARE\nTest Robe\nSage's Robe\nSockets: B-R-G\nImplicits: 0\n+2 to Level of Socketed Fire Gems\n+3 to Level of Socketed Projectile Gems\n+10% to Quality of Socketed Gems\n+4% to Quality of Socketed Fire Gems")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Slot: Body Armour\nFireball 20/5  1\nEmpower 3/0  1\nEnhance 3/0  1\n")
+		build.configTab.input.customMods = "+1 to Level of all Spell Skill Gems\n+2 to Level of all Fire Skill Gems\n+5% to Quality of all Skill Gems\n+3% to Quality of all Fire Skill Gems"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(30, build.calcsTab.mainEnv.player.mainSkill.activeEffect.level)
+		assert.are.equals(53, build.calcsTab.mainEnv.player.mainSkill.activeEffect.quality)
+		assert.are.equals(30, build.calcsTab.mainOutput.GemLevel)
+		assert.are.equals(53, build.calcsTab.mainOutput.GemQuality)
+
+		local text = gemTooltipText(build.skillsTab.socketGroupList[1].gemList[1])
+		assert.is_truthy(text:find("20 Levels from Gem (Max)", 1, true))
+		assert.is_truthy(text:find("+5 Levels from Item", 1, true))
+		assert.is_truthy(text:find("+3 Levels from Global Modifiers", 1, true))
+		assert.is_truthy(text:find("+2 Levels from Supports", 1, true))
+		assert.is_truthy(text:find("+14% Quality from Item", 1, true))
+		assert.is_truthy(text:find("+8% Quality from Global Modifiers", 1, true))
+		assert.is_truthy(text:find("+16% Quality from Support", 1, true))
+		assert.is_truthy(text:find("+10% Quality from Socket Colour", 1, true))
+
+		local levelBreakdown = table.concat(build.calcsTab.calcsEnv.player.breakdown.GemLevel, "\n")
+		assert.is_truthy(levelBreakdown:find("+ 5 ^8(level from items)", 1, true))
+		assert.is_truthy(levelBreakdown:find("+ 3 ^8(level from global modifiers)", 1, true))
+		assert.is_truthy(levelBreakdown:find("+ 2 ^8(level from support)", 1, true))
+		assert.is_truthy(levelBreakdown:find("= 30", 1, true))
+		local qualityBreakdown = table.concat(build.calcsTab.calcsEnv.player.breakdown.GemQuality, "\n")
+		assert.is_truthy(qualityBreakdown:find("+ 14 ^8(quality from items)", 1, true))
+		assert.is_truthy(qualityBreakdown:find("+ 8 ^8(quality from global modifiers)", 1, true))
+		assert.is_truthy(qualityBreakdown:find("+ 16 ^8(quality from support)", 1, true))
+		assert.is_truthy(qualityBreakdown:find("+ 10 ^8(quality from socket colour)", 1, true))
+		assert.is_truthy(qualityBreakdown:find("= 53", 1, true))
+
+		-- Exercise the visible breakdown tables, not just the calculation summary.
+		local checkedBreakdowns = 0
+		for _, calcSection in ipairs(build.calcsTab.sectionList) do
+			if calcSection.id == "SkillTypeStats" then
+				for _, row in ipairs(calcSection.subSection[1].data) do
+					if row.label == "Gem Level" or row.label == "Gem Quality" then
+						checkedBreakdowns = checkedBreakdowns + 1
+						local breakdown = build.calcsTab.controls.breakdown
+						breakdown:SetBreakdownData(row[1])
+						local groups = {}
+						for _, section in ipairs(breakdown.sectionList) do
+							if section.type == "TABLE" then
+								local name = section.rowList[1].mod.name
+								groups[name] = 0
+								for _, modifier in ipairs(section.rowList) do
+									assert.are.equals(name, modifier.mod.name, "Each gem bonus category needs its own table")
+									groups[name] = groups[name] + modifier.value
+								end
+							end
+						end
+						if row.label == "Gem Level" then
+							assert.same({ GemLevel = 20, GemItemLevel = 5, GemGlobalLevel = 3, GemSupportLevel = 2 }, groups)
+						else
+							assert.same({ GemQuality = 5, GemItemQuality = 14, GemGlobalQuality = 8, GemSupportQuality = 16, GemSocketQuality = 10 }, groups)
+						end
+					end
+				end
+			end
+		end
+		assert.are.equals(2, checkedBreakdowns)
+	end)
+
+	it("shows socketed gem levels from a helmet as item bonuses in the tooltip", function()
+		build.itemsTab:CreateDisplayItemFromRaw("Rarity: RARE\nTest Helmet\nHubris Circlet\nSockets: G\nImplicits: 0\n+6 to Level of Socketed Gems")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Slot: Helmet\nTornado 18/0  1\n")
+		runCallback("OnFrame")
+
+		local text = gemTooltipText(build.skillsTab.socketGroupList[1].gemList[1])
+		assert.is_truthy(text:find("Level: " .. colorCodes.MAGIC .. "24", 1, true))
+		assert.is_truthy(text:find("18 Levels from Gem", 1, true))
+		assert.is_truthy(text:find("+6 Levels from Item", 1, true))
+		assert.is_nil(text:find("Levels from Global Modifiers", 1, true))
+		assert.is_nil(text:find("Levels from Supports", 1, true))
+	end)
+
+	it("breaks down Tornado's gem level and global levels in its tooltip", function()
+		build.skillsTab:PasteSocketGroup("Tornado 18/0  1\n")
+		build.configTab.input.customMods = "+4 to Level of all Spell Skill Gems"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		local text = gemTooltipText(build.skillsTab.socketGroupList[1].gemList[1])
+		assert.is_truthy(text:find("Level: " .. colorCodes.MAGIC .. "22", 1, true))
+		assert.is_truthy(text:find("18 Levels from Gem", 1, true))
+		assert.is_truthy(text:find("+4 Levels from Global Modifiers", 1, true))
+		assert.is_nil(text:find("Levels from Supports", 1, true))
+	end)
+
 	it("adds envy, ensures +1 level keeps level 25 Envy", function()
 		build.itemsTab:CreateDisplayItemFromRaw("New Item\nAssassin Bow\nGrants Level 1 Summon Raging Spirit\nGrants Level 25 Envy Skill")
 		build.itemsTab:AddDisplayItem()
@@ -21,6 +182,19 @@ describe("TestSkills", function()
 		runCallback("OnFrame")
 		-- No Envy level increase, so base should still be 205
 		assert.are.equals(round(205 * 1.44), build.calcsTab.mainEnv.minion.modDB:Sum("BASE", build.calcsTab.mainEnv.minion.mainSkill.skillCfg, "ChaosMin"))
+	end)
+
+	it("applies Aspect of the Brine King's chilling aura", function()
+		build.itemsTab:CreateDisplayItemFromRaw("New Item\nCoral Amulet\nGrants Level 20 Aspect of the Brine King Skill")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Freezing Pulse 20/0  1\n")
+		runCallback("OnFrame")
+
+		local env = build.calcsTab.mainEnv
+		assert.is_true(env.enemy.modDB:Flag(nil, "Condition:Chilled"))
+		assert.are.equals(15, build.calcsTab.mainOutput.CurrentChill)
+		assert.are.equals(50, env.player.mainSkill.skillModList:Sum("INC", env.player.mainSkill.skillCfg, "EnemyChillEffect"))
+		assert.are.equals(10, env.player.mainSkill.skillModList:Sum("BASE", env.player.mainSkill.skillCfg, "ColdPenetration"))
 	end)
 
 	it("Test Mirage Archer using triggered skill", function()
@@ -76,6 +250,56 @@ describe("TestSkills", function()
 
 		assert.True(build.calcsTab.mainOutput.MirageDPS ~= nil)
 	end)
+
+	it("checks equipped weapon types for support-granted attacks", function()
+		build.itemsTab:CreateDisplayItemFromRaw("Test Claw\nImperial Claw")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Cobra Lash 20/0  1\nWindburst 20/0  1\nNightblade 20/0  1\nSacred Wisps 20/0  1\n")
+		runCallback("OnFrame")
+
+		local windburst
+		for _, activeSkill in ipairs(build.calcsTab.mainEnv.player.activeSkillList) do
+			if activeSkill.activeEffect.grantedEffect.id == "TriggeredSupportWindburst" then
+				windburst = activeSkill
+				break
+			end
+		end
+		assert.is_not_nil(windburst)
+
+		local supports = { }
+		for _, effect in ipairs(windburst.effectList) do
+			supports[effect.grantedEffect.id] = true
+		end
+		assert.is_true(supports.SupportNightblade)
+		assert.is_nil(supports.SupportSacredWisps)
+	end)
+
+	it("keeps Mana-Infused Staff reservation on mana and disables it without mana", function()
+		build.itemsTab:CreateDisplayItemFromRaw("Test Staff\nJudgement Staff")
+		build.itemsTab:AddDisplayItem()
+		build.skillsTab:PasteSocketGroup("Mana-Infused Staff 20/0  1\nArrogance 20/0  1\n")
+		runCallback("OnFrame")
+
+		local activeSkill = build.calcsTab.mainEnv.player.mainSkill
+		assert.are.equals("SupportArrogance", activeSkill.effectList[2].grantedEffect.id)
+		assert.is_nil(activeSkill.skillFlags.disable)
+		assert.are.equals(30, build.calcsTab.mainEnv.player.output.ManaReservedPercent)
+		assert.are.equals(0, build.calcsTab.mainEnv.player.output.LifeReserved)
+
+		build.configTab.input.customMods = "Removes all mana\nSkills Reserve Life instead of Mana"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		activeSkill = build.calcsTab.mainEnv.player.mainSkill
+		assert.is_true(activeSkill.skillFlags.disable)
+		assert.are.equals("This skill requires reserving Mana", activeSkill.disableReason)
+		assert.is_nil(activeSkill.skillData.ManaReservedBase)
+		assert.is_nil(activeSkill.skillData.ManaReservedPercent)
+		assert.is_nil(activeSkill.skillData.LifeReservedBase)
+		assert.are.equals(0, build.calcsTab.mainEnv.player.reserved_ManaPercent)
+		assert.is_nil(build.calcsTab.mainEnv.player.output.ManaReservedPercent)
+		assert.are.equals(0, #build.calcsTab.mainEnv.player.breakdown.ManaReserved.reservations)
+	end)
 	
 	it("Test Scorching ray applying exposure at max stages", function()
 		build.skillsTab:PasteSocketGroup("Scorching Ray 20/0  1\n")
@@ -130,6 +354,29 @@ describe("TestSkills", function()
 		assert.are.equals(cappedAverageDamage, build.calcsTab.mainOutput.AverageDamage)
 		assert.are.equals(cappedTotalDPS, build.calcsTab.mainOutput.TotalDPS)
 		assert.are.equals(cappedCombinedDPS, build.calcsTab.mainOutput.CombinedDPS)
+	end)
+
+	it("uses enemy radius when calculating Ball Lightning hits", function()
+		build.skillsTab:PasteSocketGroup("Ball Lightning 20/0  1\n")
+		runCallback("OnFrame")
+
+		local mainSocketGroup = build.skillsTab.socketGroupList[build.mainSocketGroup]
+		mainSocketGroup.displaySkillList[mainSocketGroup.mainActiveSkill].activeEffect.srcInstance.skillPart = 2
+		build.configTab.input.projectileDistance = 40
+		build.configTab.input.enemyRadius = 1
+		build.configTab:BuildModList()
+		build.modFlag = true
+		build.buildFlag = true
+		runCallback("OnFrame")
+		local smallEnemyHits = build.calcsTab.mainOutput.SkillDPSMultiplier
+
+		build.configTab.input.enemyRadius = 11
+		build.configTab:BuildModList()
+		build.modFlag = true
+		build.buildFlag = true
+		runCallback("OnFrame")
+
+		assert.is_true(build.calcsTab.mainOutput.SkillDPSMultiplier > smallEnemyHits)
 	end)
 
 	it("Test Adrenaline affecting blight max stage count", function()
@@ -246,6 +493,36 @@ describe("TestSkills", function()
 		assert.are.near(singleBrandDPS * 2, build.calcsTab.mainOutput.TotalDot, 10 ^ -9)
 	end)
 
+	it("applies Follow-Through to projectile hits and ailments with a shared cap", function()
+		build.skillsTab:PasteSocketGroup("Ethereal Knives 20/0  1\n")
+		local modText = "Projectiles deal %d%% increased Damage with Hits and Ailments for each remaining Chain%s"
+		for _, case in ipairs({
+			{ suffix = ", up to a maximum of 100%", value = 20, chains = 3, used = 0, copies = 1, expected = 60 },
+			{ suffix = ", up to a maximum of 100%", value = 20, chains = 3, used = 0, copies = 2, expected = 100 },
+			{ suffix = ", up to a maximum of 100%", value = 20, chains = 6, used = 0, copies = 1, expected = 100 },
+			{ suffix = ", up to a maximum of 100%", value = 20, chains = 3, used = 2, copies = 1, expected = 20 },
+			{ suffix = ", up to a maximum of 100%", value = 20, chains = 3, used = 3, copies = 1, expected = 0 },
+			{ suffix = ", up to 100%", value = 20, chains = 3, used = 0, copies = 2, expected = 100 },
+			{ suffix = "", value = 15, chains = 6, used = 0, copies = 2, expected = 180 },
+		}) do
+			local baseMods = "100% chance to Poison on Hit\nSkills Chain +" .. case.chains .. " times\n"
+			build.configTab.input.skillChainCount = case.used
+			build.configTab.input.customMods = baseMods .. case.expected .. "% increased Damage with Hits and Ailments"
+			build.configTab:BuildModList()
+			runCallback("OnFrame")
+			local expectedHit = build.calcsTab.mainOutput.AverageHit
+			local expectedPoison = build.calcsTab.mainOutput.PoisonDPS
+			assert.is_true(expectedHit > 0 and expectedPoison > 0)
+
+			build.configTab.input.customMods = baseMods .. (modText:format(case.value, case.suffix) .. "\n"):rep(case.copies)
+			build.configTab:BuildModList()
+			runCallback("OnFrame")
+			assert.are.equals(case.chains - case.used, build.calcsTab.mainOutput.ChainRemaining)
+			assert.are.near(expectedHit, build.calcsTab.mainOutput.AverageHit, 10 ^ -9)
+			assert.are.near(expectedPoison, build.calcsTab.mainOutput.PoisonDPS, 10 ^ -9)
+		end
+	end)
+
 	it("caps total Brand Recall Cooldown Recovery from multiple Chip Away notables at 40%", function()
 		build.skillsTab:PasteSocketGroup("Storm Brand 20/0  1\n")
 		build.configTab.input.ActiveBrands = 10
@@ -331,8 +608,8 @@ describe("TestSkills", function()
 		runCallback("OnFrame")
 
 		local genericEfficiencyCost = build.calcsTab.mainOutput.ManaCost
-		-- Test actual behavior: 12/1.25 = 9.6 (not rounded)
-		assert.True(math.abs(genericEfficiencyCost - 9.6) < 0.001)
+		-- The game rounds 12 / 1.25 = 9.6 after applying efficiency.
+		assert.are.equals(10, genericEfficiencyCost)
 
 		-- Test multiple efficiency sources stacking additively
 		build.configTab.input.customMods = "25% increased Cost Efficiency\n25% increased Mana Cost Efficiency"
@@ -381,6 +658,46 @@ describe("TestSkills", function()
 		assert.equals(18, build.calcsTab.mainOutput.LifeCost)
 	end)
 
+	it("converts and rounds flat mana cost separately from base cost", function()
+		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Life instead of 15% of Mana Cost\n+4 to Total Mana Cost"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.equals(3, build.calcsTab.mainOutput.LifeCost)
+		assert.equals(13, build.calcsTab.mainOutput.ManaCost)
+	end)
+
+	it("moves flat mana cost when all costs are converted", function()
+		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Life instead of Mana\n+4 to Total Mana Cost"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.equals(16, build.calcsTab.mainOutput.LifeCost)
+		assert.equals(0, build.calcsTab.mainOutput.ManaCost)
+	end)
+
+	it("does not move reduced flat mana cost to life", function()
+		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Life instead of Mana\nNon-Channelling Skills have -7 to Total Mana Cost"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.equals(12, build.calcsTab.mainOutput.LifeCost)
+		assert.equals(0, build.calcsTab.mainOutput.ManaCost)
+	end)
+
+	it("does not partially convert reduced flat mana cost to life", function()
+		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Life instead of 15% of Mana Cost\nNon-Channelling Skills have -7 to Total Mana Cost"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.equals(2, build.calcsTab.mainOutput.LifeCost)
+		assert.equals(4, build.calcsTab.mainOutput.ManaCost)
+	end)
+
 	it("Test flat cost is added after cost efficiency for energy shield costs", function()
 		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
 
@@ -391,6 +708,58 @@ describe("TestSkills", function()
 
 		-- 12 / 1.5 + 10 = 18
 		assert.equals(18, build.calcsTab.mainOutput.ESCost)
+	end)
+
+	it("moves flat mana cost to energy shield with the base cost", function()
+		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Energy Shield instead of Mana or Life\n+4 to Total Mana Cost"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.equals(16, build.calcsTab.mainOutput.ESCost)
+		assert.equals(0, build.calcsTab.mainOutput.ManaCost)
+	end)
+
+	it("does not move reduced flat mana cost to energy shield", function()
+		build.skillsTab:PasteSocketGroup("Hydrosphere 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Energy Shield instead of Mana or Life\nNon-Channelling Skills have -7 to Total Mana Cost"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.equals(12, build.calcsTab.mainOutput.ESCost)
+		assert.equals(0, build.calcsTab.mainOutput.ManaCost)
+	end)
+
+	it("only grants payable cost damage when the full cost can be paid", function()
+		build.skillsTab:PasteSocketGroup("Fireball 1/0  1\n")
+		build.configTab.input.customMods = "Skills gain Added Chaos Damage equal to 25% of Mana Cost, if Mana Cost is not higher than the maximum you could spend"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(5, build.calcsTab.mainOutput.ManaCost)
+		assert.are.equals(1, build.calcsTab.mainEnv.player.mainSkill.skillModList:Sum("BASE", build.calcsTab.mainEnv.player.mainSkill.skillCfg, "ChaosMin"))
+
+		build.configTab.input.customMods = build.configTab.input.customMods .. "\n-10000 to maximum Mana"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(0, build.calcsTab.mainEnv.player.mainSkill.skillModList:Sum("BASE", build.calcsTab.mainEnv.player.mainSkill.skillCfg, "ChaosMin"))
+
+		build.configTab.input.customMods = build.configTab.input.customMods .. "\nEnergy Shield protects Mana instead of Life\n+100 to maximum Energy Shield"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(1, build.calcsTab.mainEnv.player.mainSkill.skillModList:Sum("BASE", build.calcsTab.mainEnv.player.mainSkill.skillCfg, "ChaosMin"))
+	end)
+
+	it("checks life-cost damage against the full life cost", function()
+		build.skillsTab:PasteSocketGroup("Fireball 1/0  1\n")
+		build.configTab.input.customMods = "Skills Cost Life instead of Mana\nSkills gain Added Chaos Damage equal to 25% of Life Cost, if Life Cost is not higher than the maximum you could spend\n-10000 to maximum Life"
+		build.configTab:BuildModList()
+		runCallback("OnFrame")
+
+		assert.are.equals(5, build.calcsTab.mainOutput.LifeCost)
+		assert.are.equals(0, build.calcsTab.mainEnv.player.mainSkill.skillModList:Sum("BASE", build.calcsTab.mainEnv.player.mainSkill.skillCfg, "ChaosMin"))
 	end)
 	it("Test mana cost efficiency with support gems", function()
 		-- Test interaction between cost efficiency and cost multipliers
@@ -403,6 +772,17 @@ describe("TestSkills", function()
 
 		local finalCost = build.calcsTab.mainOutput.ManaCost
 		assert.are.equals(7, round(finalCost))
+	end)
+
+	it("rounds Supreme Ego mana reservation down", function()
+		build.skillsTab:PasteSocketGroup("Precision 1/0  1\n")
+		local supremeEgo = build.spec.tree.keystoneMap["Supreme Ego"]
+		build.spec:AllocNode(build.spec.nodes[supremeEgo.id])
+		build.spec:BuildAllDependsAndPaths()
+		runCallback("OnFrame")
+
+		-- 22 base + floor(40% of 22) = 30, rather than round(22 * 1.4) = 31.
+		assert.are.equals(30, build.calcsTab.mainEnv.player.mainSkill.skillData.ManaReservedBase)
 	end)
 
 	it("evaluates BaseFlag tags using PoB 1 skill data", function()
@@ -509,6 +889,50 @@ describe("TestSkills", function()
 			build.skillsTab:PasteSocketGroup(test[1].." 20/0  1\n"..test[2].." 1/0  1")
 			runCallback("OnFrame")
 			assert.is_nil(build.calcsTab.mainOutput[test[3]])
+		end
+	end)
+
+	it("ignores invalid extra supports while allowing support name collisions", function()
+		build.skillsTab:PasteSocketGroup("Slot: Gloves\nFireball 20/0  1")
+		runCallback("OnFrame")
+		build.configTab.input.customMods = "Skills socketed in your gloves are supported by level 20 Arc"
+		build.configTab:BuildModList()
+		build.modFlag = true
+		build.buildFlag = true
+		assert.has_no.errors(function()
+			main:OnFrame()
+		end)
+		assert.are.equals(0, #build.calcsTab.mainEnv.player.mainSkill.supportList)
+
+		newBuild()
+		build.skillsTab:PasteSocketGroup("Slot: Gloves\nFireball 20/0  1")
+		build.configTab.input.customMods = "Skills socketed in your gloves are supported by level 20 Arcane Surge"
+		build.configTab:BuildModList()
+		main:OnFrame()
+		local arcaneSurge = build.calcsTab.mainEnv.player.mainSkill.supportList[1]
+		assert.are.equals("SupportArcaneSurge", arcaneSurge.grantedEffect.id)
+		assert.are.equals(20, arcaneSurge.level)
+
+		newBuild()
+		build.skillsTab:PasteSocketGroup("Slot: Gloves\nRain of Arrows 20/0  1")
+		build.configTab.input.customMods = "Skills socketed in your gloves are supported by level 20 Barrage"
+		build.configTab:BuildModList()
+		main:OnFrame()
+		local barrage = build.calcsTab.mainEnv.player.mainSkill.supportList[1]
+		assert.are.equals("SupportBarrage", barrage.grantedEffect.id)
+		assert.are.equals(20, barrage.level)
+	end)
+
+	it("does not grant Cruelty to Totem, Trap or Mine skills", function()
+		build.skillsTab:PasteSocketGroup("Cold Snap 20/0  1\nCruelty 20/0  1")
+		runCallback("OnFrame")
+		assert.are.equals(40, build.calcsTab.mainEnv.player.modDB.multipliers["Cruelty"])
+
+		for _, proxySupport in ipairs({ "Spell Totem", "Trap", "Blastchain Mine" }) do
+			newBuild()
+			build.skillsTab:PasteSocketGroup("Cold Snap 20/0  1\nCruelty 20/0  1\n"..proxySupport.." 20/0  1")
+			runCallback("OnFrame")
+			assert.is_nil(build.calcsTab.mainEnv.player.modDB.multipliers["Cruelty"])
 		end
 	end)
 end)

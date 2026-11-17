@@ -880,38 +880,24 @@ return {
 		},
 		[2]={
 			list=false,
-			name="ConnectionArt",
-			refTo="PassiveSkillTreeConnectionArt",
-			type="Key",
-			width=180
-		},
-		[3]={
-			list=false,
-			name="KeystoneFrameArt",
-			refTo="PassiveSkillTreeNodeFrameArt",
-			type="Key",
-			width=180
-		},
-		[4]={
-			list=false,
 			name="RadiiArt",
 			refTo="PassiveJewelRadiiArt",
 			type="Key",
 			width=150
 		},
-		[5]={
+		[3]={
 			list=false,
-			name="NotableFrameArt",
-			refTo="PassiveSkillTreeNodeFrameArt",
+			name="ConnectionArt",
+			refTo="PassiveSkillTreeConnectionArt",
 			type="Key",
 			width=180
 		},
-		[6]={
+		[4]={
 			list=false,
-			name="AscendancyFrameArt",
-			refTo="PassiveSkillTreeNodeFrameArt",
+			name="",
+			refTo="",
 			type="Key",
-			width=200
+			width=150
 		}
 	},
 	alternatetreepassivesizes={
@@ -1606,6 +1592,55 @@ return {
 	atlasexileregionquestflags={
 	},
 	atlasexiles={
+		[1]={
+			list=false,
+			name="Id",
+			refTo="",
+			type="String",
+			width=150
+		},
+		[2]={
+			list=false,
+			name="",
+			refTo="",
+			type="Int",
+			width=50
+		},
+		[3]={
+			list=false,
+			name="InfluencedItemIncrStat",
+			refTo="Stats",
+			type="Key",
+			width=230
+		},
+		[4]={
+			list=false,
+			name="MapIcon",
+			refTo="",
+			type="String",
+			width=150
+		},
+		[5]={
+			list=false,
+			name="MapIcon2",
+			refTo="",
+			type="String",
+			width=150
+		},
+		[6]={
+			list=false,
+			name="Influence",
+			refTo="",
+			type="String",
+			width=150
+		},
+		[7]={
+			list=false,
+			name="CitadelName",
+			refTo="",
+			type="String",
+			width=150
+		}
 	},
 	atlasfavouredmapslots={
 	},
@@ -1980,7 +2015,7 @@ return {
 		},
 		[23]={
 			list=false,
-			name="",
+			name="Drops",
 			refTo="",
 			type="Bool",
 			width=50
@@ -2036,15 +2071,15 @@ return {
 		},
 		[31]={
 			list=false,
-			name="",
-			refTo="",
-			type="Bool",
+			name="ShopTag",
+			refTo="ShopTag",
+			type="Key",
 			width=150
 		},
 		[32]={
-			list=false,
-			name="ShopTag",
-			refTo="ShopTag",
+			list=true,
+			name="",
+			refTo="",
 			type="Key",
 			width=150
 		},
@@ -2063,13 +2098,6 @@ return {
 			width=150
 		},
 		[35]={
-			list=true,
-			name="",
-			refTo="",
-			type="Key",
-			width=150
-		},
-		[36]={
 			list=true,
 			name="EnchantMods",
 			refTo="Mods",
@@ -4817,6 +4845,27 @@ return {
 	elderbossarenas={
 	},
 	elderguardians={
+		[1]={
+			list=false,
+			name="Id",
+			refTo="",
+			type="String",
+			width=150
+		},
+		[2]={
+			list=false,
+			name="MapIcon",
+			refTo="",
+			type="String",
+			width=150
+		},
+		[3]={
+			list=false,
+			name="Name",
+			refTo="",
+			type="String",
+			width=150
+		}
 	},
 	eldermapbossoverride={
 	},
@@ -5388,6 +5437,38 @@ return {
 	extraterrainfeaturefamily={
 	},
 	extraterrainfeatures={
+	},
+	fishinghooktypes={
+		[1]={
+			list=false,
+			name="Id",
+			refTo="",
+			type="Int",
+			width=50
+		},
+		[2]={
+			list=false,
+			name="Name",
+			refTo="",
+			type="String",
+			width=150
+		}
+	},
+	fishingluretypes={
+		[1]={
+			list=false,
+			name="Id",
+			refTo="",
+			type="Int",
+			width=50
+		},
+		[2]={
+			list=false,
+			name="Name",
+			refTo="",
+			type="String",
+			width=150
+		}
 	},
 	fixedhideoutdoodads={
 	},
@@ -6453,6 +6534,29 @@ return {
 	incursionuniqueupgradecomponents={
 	},
 	incursionuniqueupgrades={
+	},
+	indexablenonactivesupportgems={
+		[1]={
+			list=false,
+			name="Index",
+			refTo="",
+			type="Int",
+			width=70
+		},
+		[2]={
+			list=false,
+			name="SupportGem",
+			refTo="SkillGems",
+			type="Key",
+			width=400
+		},
+		[3]={
+			list=false,
+			name="Name",
+			refTo="",
+			type="String",
+			width=300
+		}
 	},
 	indexableskillgems={
 		[1]={
@@ -8274,6 +8378,13 @@ return {
 			refTo="MinionType",
 			type="Key",
 			width=200
+		},
+		[4]={
+			list=false,
+			name="Name",
+			refTo="",
+			type="String",
+			width=150
 		}
 	},
 	miniontype={
@@ -8738,7 +8849,7 @@ return {
 			name="Stat2",
 			refTo="Stats",
 			type="Key",
-			width=200
+			width=480
 		},
 		[7]={
 			list=false,
@@ -8752,7 +8863,7 @@ return {
 			name="Stat4",
 			refTo="Stats",
 			type="Key",
-			width=200
+			width=430
 		},
 		[9]={
 			list=false,
@@ -8829,7 +8940,7 @@ return {
 			name="Tags",
 			refTo="Tags",
 			type="Key",
-			width=150
+			width=220
 		},
 		[20]={
 			list=true,
@@ -9142,6 +9253,27 @@ return {
 		[64]={
 			list=false,
 			name="",
+			refTo="",
+			type="Bool",
+			width=150
+		},
+		[65]={
+			list=true,
+			name="",
+			refTo="",
+			type="Int",
+			width=150
+		},
+		[66]={
+			list=true,
+			name="",
+			refTo="",
+			type="Int",
+			width=150
+		},
+		[67]={
+			list=false,
+			name="ShowGrantedEffects",
 			refTo="",
 			type="Bool",
 			width=150
@@ -12043,10 +12175,10 @@ return {
 		},
 		[8]={
 			list=false,
-			name="",
+			name="RandomizeVisualRotationOnSpawn",
 			refTo="",
 			type="Bool",
-			width=50
+			width=200
 		},
 		[9]={
 			list=false,
@@ -12071,31 +12203,31 @@ return {
 		},
 		[12]={
 			list=false,
-			name="",
-			refTo="",
+			name="MiscAnimated",
+			refTo="MiscAnimated",
 			type="Key",
-			width=40
+			width=220
 		},
 		[13]={
 			list=false,
 			name="",
 			refTo="",
 			type="Int",
-			width=50
+			width=150
 		},
 		[14]={
 			list=false,
-			name="",
+			name="ApplyProjectileSpeedToAuxiliarySpeed",
 			refTo="",
 			type="Bool",
-			width=50
+			width=200
 		},
 		[15]={
 			list=false,
-			name="",
+			name="AuxiliarySpeedCannotBeBelowBase",
 			refTo="",
 			type="Bool",
-			width=50
+			width=190
 		},
 		[16]={
 			list=true,
@@ -12483,6 +12615,29 @@ return {
 	sentineltaggedmonsterstats={
 	},
 	sessionquestflags={
+	},
+	shaperapparitionability={
+		[1]={
+			list=false,
+			name="Id",
+			refTo="",
+			type="Int",
+			width=50
+		},
+		[2]={
+			list=false,
+			name="GrantedEffect",
+			refTo="GrantedEffects",
+			type="Key",
+			width=230
+		},
+		[3]={
+			list=false,
+			name="Name",
+			refTo="",
+			type="String",
+			width=150
+		}
 	},
 	shaperguardians={
 	},
@@ -13310,17 +13465,17 @@ return {
 		},
 		[3]={
 			list=false,
-			name="",
+			name="GameObjectRegisterKey",
 			refTo="",
 			type="Int",
-			width=80
+			width=170
 		},
 		[4]={
 			list=false,
-			name="",
-			refTo="",
+			name="SummonEffect",
+			refTo="MiscAnimated",
 			type="Key",
-			width=80
+			width=170
 		},
 		[5]={
 			list=false,
@@ -13359,15 +13514,15 @@ return {
 		},
 		[10]={
 			list=false,
-			name="",
-			refTo="",
+			name="BuffDefinition",
+			refTo="BuffDefinitions",
 			type="Key",
 			width=80
 		},
 		[11]={
 			list=false,
-			name="",
-			refTo="",
+			name="BuffVisual",
+			refTo="BuffVisuals",
 			type="Key",
 			width=80
 		},

@@ -3,6 +3,15 @@
 
 local M = {}
 
+-- PoB 2.67 and older construct with new("Item", raw); PoB 3.30 splits this into
+-- new("Item"):Item(raw) and its new() rejects constructor arguments. Only the old
+-- new() is variadic, so detect which class system is loaded.
+local function construct(className, ...)
+  if debug.getinfo(new, 'u').isvararg then return new(className, ...) end
+  local object = new(className)
+  return object[className](object, ...)
+end
+
 -- Constants
 local MIN_PLAYER_LEVEL = 1
 local MAX_PLAYER_LEVEL = 100
@@ -1620,12 +1629,12 @@ function M.create_spec(params)
   local newSpec
   if params and params.copyFrom and specs[params.copyFrom] then
     local src = specs[params.copyFrom]
-    newSpec = new("PassiveSpec", build, src.treeVersion)
+    newSpec = construct("PassiveSpec", build, src.treeVersion)
     newSpec.title = params.title or ((src.title or 'Default') .. ' (copy)')
     newSpec.jewels = copyTable(src.jewels)
     newSpec:RestoreUndoState(src:CreateUndoState(), src.treeVersion)
   else
-    newSpec = new("PassiveSpec", build, latestTreeVersion)
+    newSpec = construct("PassiveSpec", build, latestTreeVersion)
     newSpec.title = (params and params.title) or ('Spec ' .. tostring(#specs + 1))
   end
   table.insert(specs, newSpec)
@@ -2132,7 +2141,7 @@ function M.probe_stat_weights(params)
   -- clone/normalisation artifacts cancel out of every delta.
   local baseDPS, baseEHP, baseMinionDPS, baseFullDPS = 0, 0, 0, 0
   local okBase, baseErr = pcall(function()
-    local baseItem = new('Item', rawText)
+    local baseItem = construct('Item', rawText)
     if not baseItem or not baseItem.baseName then error('failed to re-parse carrier item') end
     local out = calcFunc({ repSlotName = repSlot, repItem = baseItem })
     baseDPS = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
@@ -2150,7 +2159,7 @@ function M.probe_stat_weights(params)
   for _, modLine in ipairs(mods) do
     if type(modLine) == 'string' and #modLine > 0 and #modLine < 200 then
       local ok, res = pcall(function()
-        local probeItem = new('Item', rawText .. '\n' .. modLine)
+        local probeItem = construct('Item', rawText .. '\n' .. modLine)
         if not probeItem or not probeItem.baseName then error('probe item parse failed') end
         local out = calcFunc({ repSlotName = repSlot, repItem = probeItem })
         local dps = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
@@ -2270,7 +2279,7 @@ function M.generate_weighted_trade_query(params)
   end
 
   -- Instantiate a generator against the build's tradeQuery object
-  local ok_gen, gen = pcall(function() return new("TradeQueryGenerator", tradeQuery) end)
+  local ok_gen, gen = pcall(function() return construct("TradeQueryGenerator", tradeQuery) end)
   if not ok_gen or not gen then
     return nil, 'failed to create TradeQueryGenerator: ' .. tostring(gen)
   end

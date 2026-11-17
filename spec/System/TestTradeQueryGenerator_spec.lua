@@ -1,5 +1,5 @@
 describe("TradeQueryGenerator", function()
-	local mock_queryGen = new("TradeQueryGenerator", { itemsTab = {} })
+	local mock_queryGen = new("TradeQueryGenerator"):TradeQueryGenerator({ itemsTab = {} })
 
 	describe("ProcessMod", function()
 		-- Pass: Mod line maps correctly to trade stat entry without error
@@ -16,7 +16,7 @@ describe("TradeQueryGenerator", function()
 
 	describe("Talisman mods", function()
 		it("only generates enchant weights when enabled", function()
-			local queryGen = new("TradeQueryGenerator", { itemsTab = { } })
+			local queryGen = new("TradeQueryGenerator"):TradeQueryGenerator({ itemsTab = {} })
 			local enchantMods = queryGen.modData.Enchant
 			queryGen.modData = { Explicit = { }, Implicit = { }, Enchant = enchantMods, Corrupted = { }, Scourge = { } }
 			queryGen.calcContext = { special = { }, options = { } }
@@ -43,6 +43,18 @@ describe("TradeQueryGenerator", function()
 			assert.is_not_nil(enchant)
 			assert.are.equals("enchant.stat_2567919918", enchant.tradeMod.id)
 			assert.are.equals("Utility Flasks gain # Charges every 3 seconds", enchant.specialCaseData.overrideModLine)
+		end)
+	end)
+
+	describe("Eldritch mods", function()
+		it("shows the Eldritch options for amulets", function()
+			local queryGen = new("TradeQueryGenerator"):TradeQueryGenerator({ itemsTab = { items = { } } })
+			queryGen:RequestQuery({ slotName = "Amulet" }, {
+				slotTbl = { slotName = "Amulet", alreadyCorrupted = false },
+			}, { }, function() end)
+
+			assert.is_not_nil(main.popups[1].controls.includeEldritch)
+			main:ClosePopup()
 		end)
 	end)
 
@@ -155,7 +167,7 @@ describe("TradeQueryGenerator", function()
 
 	describe("Filter prioritization", function()
 		it("counts socket and link constraints against MAX_FILTERS", function()
-			local queryGen = new("TradeQueryGenerator", { itemsTab = { items = { } } })
+			local queryGen = new("TradeQueryGenerator"):TradeQueryGenerator({ itemsTab = { items = {} } })
 			queryGen.modWeights = { }
 			for index = 1, 40 do
 				table.insert(queryGen.modWeights, {
@@ -165,7 +177,7 @@ describe("TradeQueryGenerator", function()
 				})
 			end
 			queryGen.calcContext = {
-				testItem = new("Item", "Rarity: RARE\nNew Item\nGold Ring\nImplicits: 0"),
+				testItem = new("Item"):Item("Rarity: RARE\nNew Item\nGold Ring\nImplicits: 0"),
 				baseOutput = { },
 				baseStatValue = 0,
 				itemCategoryQueryStr = "accessory.ring",
@@ -181,8 +193,8 @@ describe("TradeQueryGenerator", function()
 			}
 			queryGen.tradeTypeIndex = 1
 			local query
-			queryGen.requesterCallback = function(_, queryJson)
-				query = require("dkjson").decode(queryJson).query
+			queryGen.requesterCallback = function(_, generatedQuery)
+				query = generatedQuery
 			end
 
 			queryGen:FinishQuery()
@@ -190,6 +202,17 @@ describe("TradeQueryGenerator", function()
 			assert.are.equal(31, #query.stats[1].filters)
 			assert.is_not_nil(query.filters.socket_filters.filters.sockets)
 			assert.is_not_nil(query.filters.socket_filters.filters.links)
+
+			-- Account searches must also work without a maximum price.
+			queryGen.calcContext.options = {
+				statWeights = {}, influence1 = 1, influence2 = 1,
+				includeMirrored = true, account = "ExampleAccount", maxLevel = 80, links = 5,
+			}
+			queryGen:FinishQuery()
+			assert.same({ input = "ExampleAccount" }, query.filters.trade_filters.filters.account)
+			assert.same({ max = 80 }, query.filters.req_filters.filters.lvl)
+			assert.same({ min = 5, max = 5 }, query.filters.socket_filters.filters.links)
+			assert.is_nil(query.filters.socket_filters.filters.sockets)
 		end)
 	end)
 end)

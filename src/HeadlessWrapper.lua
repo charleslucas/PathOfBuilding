@@ -1,105 +1,41 @@
 #@
+---@diagnostic disable: lowercase-global
 -- This wrapper allows the program to run headless on any OS (in theory)
 -- It can be run using a standard lua interpreter, although LuaJIT is preferable
 
+-- define global SimpleGraphic API functions. some of these have dummy function
+-- bodies intended for headless use.
+dofile("_SimpleGraphic.def.lua")
 
-
--- Callbacks
-local callbackTable = { }
-local mainObject
-function runCallback(name, ...)
-	if callbackTable[name] then
-		return callbackTable[name](...)
-	elseif mainObject and mainObject[name] then
-		return mainObject[name](mainObject, ...)
-	end
-end
-function SetCallback(name, func)
-	callbackTable[name] = func
-end
-function GetCallback(name)
-	return callbackTable[name]
-end
-function SetMainObject(obj)
-	mainObject = obj
-end
-
--- Image Handles
-local imageHandleClass = { }
-imageHandleClass.__index = imageHandleClass
-function NewImageHandle()
-	return setmetatable({ }, imageHandleClass)
-end
-function imageHandleClass:Load(fileName, ...)
-	self.valid = true
-end
-function imageHandleClass:Unload()
-	self.valid = false
-end
-function imageHandleClass:IsValid()
-	return self.valid
-end
-function imageHandleClass:SetLoadingPriority(pri) end
-function imageHandleClass:ImageSize()
-	return 1, 1
-end
-
--- Rendering
-function RenderInit(flag, ...) end
-function GetScreenSize()
+function GetVirtualScreenSize()
 	return 1920, 1080
 end
-function GetScreenScale()
-	return 1
-end
-function GetVirtualScreenSize()
-	return GetScreenSize()
-end
-function GetDPIScaleOverridePercent()
-	return 1
-end
-function SetDPIScaleOverridePercent(scale) end
-function SetClearColor(r, g, b, a) end
-function SetDrawLayer(layer, subLayer) end
-function SetViewport(x, y, width, height) end
-function SetDrawColor(r, g, b, a) end
-function DrawImage(imgHandle, left, top, width, height, tcLeft, tcTop, tcRight, tcBottom) end
-function DrawImageQuad(imageHandle, x1, y1, x2, y2, x3, y3, x4, y4, s1, t1, s2, t2, s3, t3, s4, t4) end
-function DrawString(left, top, align, height, font, text) end
-function DrawStringWidth(height, font, text)
-	return 1
-end
-function DrawStringCursorIndex(height, font, text, cursorX, cursorY)
-	return 0
-end
-function StripEscapes(text)
-	return text:gsub("%^%d",""):gsub("%^x%x%x%x%x%x%x","")
-end
-function GetAsyncCount()
-	return 0
+
+-- Callbacks
+__callbackTable__ = { }
+
+function runCallback(name, ...)
+	if __callbackTable__[name] then
+		return __callbackTable__[name](...)
+	elseif __mainObject__ and __mainObject__[name] then
+		return __mainObject__[name](__mainObject__, ...)
+	end
 end
 
--- Search Handles
-function NewFileSearch() end
+local l_require = require
+function require(name)
+	-- Hack to stop it looking for lcurl, which we don't really need
+	if name == "lcurl.safe" then
+		return
+	end
+	return l_require(name)
+end
 
--- General Functions
-function SetWindowTitle(title) end
-function GetCursorPos()
-	return 0, 0
-end
-function SetCursorPos(x, y) end
-function ShowCursor(doShow) end
-function IsKeyDown(keyName) end
-function Copy(text) end
-function Paste() end
-function Deflate(data)
-	-- zlib not available in headless mode
-	return nil
-end
+
+-- ===== api-stdio fork additions (charleslucas/PathOfBuilding) =====
+-- Real Inflate via LuaJIT FFI + bundled zlib1.dll (upstream def stub returns "")
 function Inflate(data)
-	-- zlib not available in headless mode; return nil so callers treat it as missing data
 	if not data or data == "" then return nil end
-	-- Attempt to use LuaJIT FFI with the bundled zlib1.dll
 	local ok, ffi = pcall(require, 'ffi')
 	if ok and ffi then
 		local ok2, zlib = pcall(ffi.load, 'zlib1')
@@ -121,87 +57,11 @@ function Inflate(data)
 	end
 	return nil
 end
-function GetTime()
-	return 0
-end
 function GetScriptPath()
 	return rawget(_G, 'POB_SCRIPT_DIR') or ""
 end
 function GetRuntimePath()
 	return rawget(_G, 'POB_SCRIPT_DIR') or ""
-end
-function GetUserPath()
-	return ""
-end
-function MakeDir(path) end
-function RemoveDir(path) end
-function SetWorkDir(path) end
-function GetWorkDir()
-	return ""
-end
-function LaunchSubScript(scriptText, funcList, subList, ...) end
-function AbortSubScript(ssID) end
-function IsSubScriptRunning(ssID) end
-function LoadModule(fileName, ...)
-	if not fileName:match("%.lua") then
-		fileName = fileName .. ".lua"
-	end
-	local func, err = loadfile(fileName)
-	if func then
-		return func(...)
-	else
-		error("LoadModule() error loading '"..fileName.."': "..err)
-	end
-end
-function PLoadModule(fileName, ...)
-	if not fileName:match("%.lua") then
-		fileName = fileName .. ".lua"
-	end
-	local func, err = loadfile(fileName)
-	if func then
-		return PCall(func, ...)
-	else
-		error("PLoadModule() error loading '"..fileName.."': "..err)
-	end
-end
-function PCall(func, ...)
-	local ret = { pcall(func, ...) }
-	if ret[1] then
-		table.remove(ret, 1)
-		return nil, unpack(ret)
-	else
-		return ret[2]
-	end
-end
-function ConPrintf(fmt, ...)
-	-- Optional
-	print(string.format(fmt, ...))
-end
-function ConPrintTable(tbl, noRecurse) end
-function ConExecute(cmd) end
-function ConClear() end
-function SpawnProcess(cmdName, args) end
-function OpenURL(url) end
-function SetProfiling(isEnabled) end
-function Restart() end
-function Exit() end
-function TakeScreenshot() end
-
----@return string? provider
----@return string? version
----@return number? status
-function GetCloudProvider(fullPath)
-	return nil, nil, nil
-end
-
-
-local l_require = require
-function require(name)
-	-- Hack to stop it looking for lcurl, which we don't really need
-	if name == "lcurl.safe" then
-		return
-	end
-	return l_require(name)
 end
 
 -- Determine script directory for robust relative loading
@@ -215,148 +75,89 @@ local function get_script_dir()
   return ''
 end
 local POB_SCRIPT_DIR = get_script_dir()
--- If script dir unknown (e.g., launched as 'luajit HeadlessWrapper.lua'), fall back:
 if POB_SCRIPT_DIR == '' then
-  -- Case 1: running inside src
   local f1 = io.open('HeadlessWrapper.lua', 'r')
   if f1 then f1:close(); POB_SCRIPT_DIR = '.' end
 end
 if POB_SCRIPT_DIR == '' then
-  -- Case 2: running from repo root
   local f2 = io.open('src/HeadlessWrapper.lua', 'r')
   if f2 then f2:close(); POB_SCRIPT_DIR = 'src' end
 end
 if POB_SCRIPT_DIR ~= '' then
   _G.POB_SCRIPT_DIR = POB_SCRIPT_DIR
-  local pathSegs = {}
-  table.insert(pathSegs, POB_SCRIPT_DIR .. '/?.lua')
-  table.insert(pathSegs, POB_SCRIPT_DIR .. '/?/init.lua')
-  table.insert(pathSegs, package.path)
-  package.path = table.concat(pathSegs, ';')
-  -- Add runtime lua path so modules like 'xml' resolve without external LUA_PATH
-  local runtimeCandidates = {
-    POB_SCRIPT_DIR .. '/runtime/lua',
-    POB_SCRIPT_DIR .. '/../runtime/lua',
-    'runtime/lua',
-    '../runtime/lua',
-  }
-  for _, rp in ipairs(runtimeCandidates) do
-    local test = io.open(rp .. '/xml.lua', 'r')
-    if test then
-      test:close()
-      local seg = rp .. '/?.lua;"' .. rp .. '/?/init.lua"'
-      if not string.find(package.path, rp .. '/?.lua', 1, true) then
-        package.path = rp .. '/?.lua;' .. rp .. '/?/init.lua;' .. package.path
+  package.path = table.concat({ POB_SCRIPT_DIR .. '/?.lua', POB_SCRIPT_DIR .. '/?/init.lua', package.path }, ';')
+end
+-- Add PoB runtime lua path so modules like 'xml' resolve without external LUA_PATH
+do
+  local candidates = { "../runtime/lua", "runtime/lua", "../../runtime/lua" }
+  if POB_SCRIPT_DIR ~= '' then
+    table.insert(candidates, 1, POB_SCRIPT_DIR .. '/../runtime/lua')
+    table.insert(candidates, 1, POB_SCRIPT_DIR .. '/runtime/lua')
+  end
+  for _, p in ipairs(candidates) do
+    local f = io.open(p .. "/xml.lua", "r")
+    if f then f:close()
+      if not string.find(package.path, p .. "/?.lua", 1, true) then
+        package.path = p .. "/?.lua;" .. p .. "/?/init.lua;" .. package.path
       end
       break
     end
   end
 end
 
--- Allow CLI flag in addition to env var to start stdio server
 local function has_flag(flag)
   if type(arg) ~= 'table' then return false end
   for i = 1, #arg do if arg[i] == flag then return true end end
   return false
 end
-
--- If requested, start the stdio server immediately and exit
-if os.getenv('POB_API_STDIO') == '1' or has_flag('--stdio') then
-  -- Provide utf8 fallback if not present to avoid requiring external luautf8
-  if type(_G.utf8) ~= 'table' then
-    local ok_u, mod = pcall(require, 'utf8')
-    if not ok_u or type(mod) ~= 'table' then
-      local stubCandidates = {
-        (POB_SCRIPT_DIR ~= '' and (POB_SCRIPT_DIR .. '/utf8.lua')) or nil,
-        (POB_SCRIPT_DIR ~= '' and (POB_SCRIPT_DIR .. '/lua-utf8.lua')) or nil,
-        'src/utf8.lua', 'src/lua-utf8.lua'
-      }
-      for _, sp in ipairs(stubCandidates) do
-        if sp then
-          local ok2, stub = pcall(dofile, sp)
-          if ok2 and type(stub) == 'table' then _G.utf8 = stub; break end
-        end
-      end
-    else
-      _G.utf8 = mod
-    end
-  end
-  -- Load Launch.lua first to initialize mainObject and build system
-  dofile("Launch.lua")
-
-  -- Initialize the build system (same as non-STDIO mode)
-  mainObject.continuousIntegrationMode = os.getenv("CI")
-  runCallback("OnInit")
-  runCallback("OnFrame") -- Need at least one frame for everything to initialise
-
-  if mainObject.promptMsg then
-    -- Something went wrong during startup
-    io.stderr:write('[HeadlessWrapper] Error during init: ' .. tostring(mainObject.promptMsg) .. '\n')
-    error(mainObject.promptMsg)
-  end
-
-  -- Set up helper functions
-  function newBuild()
-    mainObject.main:SetMode("BUILD", false, "Help, I'm stuck in Path of Building!")
-    runCallback("OnFrame")
-  end
-  function loadBuildFromXML(xmlText, name)
-    mainObject.main:SetMode("BUILD", false, name or "", xmlText)
-    runCallback("OnFrame")
-  end
-  _G.newBuild = newBuild
-  _G.loadBuildFromXML = loadBuildFromXML
-  _G.build = mainObject.main.modes["BUILD"]
-
-  -- Now start the API server
-  local srvPath = (POB_SCRIPT_DIR ~= '' and (POB_SCRIPT_DIR .. '/API/Server.lua')) or 'API/Server.lua'
-  dofile(srvPath)
-  return
-end
-
--- Add PoB runtime lua path for external luajit runs
-do
-  local candidates = { "../runtime/lua", "runtime/lua", "../../runtime/lua" }
-  for _, p in ipairs(candidates) do
-    local f = io.open(p .. "/xml.lua", "r")
-    if f then f:close()
-      if not string.find(package.path, p .. "/?.lua", 1, true) then
-        package.path = package.path .. ";" .. p .. "/?.lua"
-      end
+local POB_STDIO_MODE = os.getenv('POB_API_STDIO') == '1' or has_flag('--stdio')
+if POB_STDIO_MODE and type(_G.utf8) ~= 'table' then
+  local ok_u, mod = pcall(require, 'utf8')
+  if ok_u and type(mod) == 'table' then
+    _G.utf8 = mod
+  else
+    for _, sp in ipairs({ POB_SCRIPT_DIR ~= '' and (POB_SCRIPT_DIR .. '/utf8.lua') or 'utf8.lua',
+                          POB_SCRIPT_DIR ~= '' and (POB_SCRIPT_DIR .. '/lua-utf8.lua') or 'lua-utf8.lua',
+                          'src/utf8.lua', 'src/lua-utf8.lua' }) do
+      local ok2, stub = pcall(dofile, sp)
+      if ok2 and type(stub) == 'table' then _G.utf8 = stub; break end
     end
   end
 end
+-- ===== end fork additions =====
+
+
 dofile("Launch.lua")
 
 -- Prevents loading of ModCache
 -- Allows running mod parsing related tests without pushing ModCache
--- The CI env var will be true when run from github workflows but should be false for other tools using the headless wrapper
-mainObject.continuousIntegrationMode = os.getenv("CI")
+-- The CI env var will be true when run from github workflows but should be false for other tools using the headless wrapper 
+__mainObject__.continuousIntegrationMode = os.getenv("CI")
 
 runCallback("OnInit")
 runCallback("OnFrame") -- Need at least one frame for everything to initialise
 
-if mainObject.promptMsg then
+if __mainObject__.promptMsg and not POB_STDIO_MODE then
 	-- Something went wrong during startup
-	print(mainObject.promptMsg)
+	print(__mainObject__.promptMsg)
 	io.read("*l")
 	return
 end
 
 -- The build module; once a build is loaded, you can find all the good stuff in here
-build = mainObject.main.modes["BUILD"]
+build = __mainObject__.main.modes["BUILD"]
 
 -- Here's some helpful helper functions to help you get started
 function newBuild()
-	mainObject.main:SetMode("BUILD", false, "Help, I'm stuck in Path of Building!")
+	__mainObject__.main:SetMode("BUILD", false, "Help, I'm stuck in Path of Building!")
 	runCallback("OnFrame")
 end
 function loadBuildFromXML(xmlText, name)
-	mainObject.main:SetMode("BUILD", false, name or "", xmlText)
+	__mainObject__.main:SetMode("BUILD", false, name or "", xmlText)
 	runCallback("OnFrame")
 end
 function loadBuildFromJSON(characterJSON)
-	mainObject.main:SetMode("BUILD", false, "")
+	__mainObject__.main:SetMode("BUILD", false, "")
 	runCallback("OnFrame")
 	-- characterJSON could, for example, be the response from the PoE API:
 	-- https://www.pathofexile.com/developer/docs/reference#characters-get
@@ -368,9 +169,13 @@ function loadBuildFromJSON(characterJSON)
 	-- Good luck!
 end
 
--- API server integration (env-gated)
--- Set POB_API_STDIO=1 to start the stdio JSON-RPC server and exit
-if os.getenv('POB_API_STDIO') == '1' then
-  dofile('API/Server.lua')
-  return
+-- api-stdio fork: start the stdio JSON-RPC server (POB_API_STDIO=1 or --stdio)
+if POB_STDIO_MODE then
+	if __mainObject__.promptMsg then
+		io.stderr:write('[HeadlessWrapper] Error during init: ' .. tostring(__mainObject__.promptMsg) .. '\n')
+		error(__mainObject__.promptMsg)
+	end
+	_G.build = build
+	dofile((POB_SCRIPT_DIR ~= '' and (POB_SCRIPT_DIR .. '/API/Server.lua')) or 'API/Server.lua')
+	return
 end

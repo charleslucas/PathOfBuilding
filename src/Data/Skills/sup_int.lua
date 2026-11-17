@@ -4,8 +4,7 @@
 -- Intelligence support gems
 -- Skill data (c) Grinding Gear Games
 --
-local skills, mod, flag, skill = ...
-
+return function(skills, mod, flag, skill)
 skills["SupportAddedChaosDamage"] = {
 	name = "Added Chaos Damage",
 	description = "Supports any skill that hits enemies.",
@@ -5894,12 +5893,10 @@ skills["SupportSacrifice"] = {
 	statDescriptionScope = "gem_stat_descriptions",
 	statMap = {
 		["support_sacrifice_sacrifice_%_of_current_life"] = {
-			mod("Multiplier:SacrificePercent", "BASE", nil, 0, 0, { type = "PercentStat", stat = "LifeUnreserved", percent = 1, actor = "parent" }),
+			skill("sacrificeLifePercent", nil),
 		},
 		["support_sacrifice_gain_%_of_sacrificed_life_as_added_chaos_damage"] = {
-			mod("ChaosMin", "BASE", nil, 0, 0, { type = "Multiplier", var = "SacrificePercent" }),
-			mod("ChaosMax", "BASE", nil, 0, 0, { type = "Multiplier", var = "SacrificePercent" }),
-			div = 100,
+			skill("sacrificeLifeAsChaos", nil),
 		},
 	},
 	qualityStats = {
@@ -7005,3 +7002,4 @@ skills["SupportVaalSacrifice"] = {
 		[15] = { 125, levelRequirement = 95, statInterpolation = { 1, }, },
 	},
 }
+end

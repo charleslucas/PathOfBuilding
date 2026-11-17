@@ -4,8 +4,10 @@
 -- Spectre Data
 -- Monster data (c) Grinding Gear Games
 --
-local minions, mod, flag = ...
 
+return function(mod, flag)
+	---@class SpectreData
+	local minions = {}
 -- Blackguard
 minions["Metadata/Monsters/Axis/AxisCaster"] = {
 	name = "Blackguard Mage",
@@ -2494,7 +2496,7 @@ minions["Metadata/Monsters/Skeletons/SkeletonBowProjectileWeaknessCurse"] = {
 }
 minions["Metadata/Monsters/Skeletons/SkeletonMeleeKnightElementalSwordIncursionChampion"] = {
 	name = "Enhanced Vaal Fallen",
-	monsterTags = { "bone_armour", "bones", "construct", "has_two_hand_sword", "has_two_handed_melee", "medium_height", "melee", "no_pantheon_mod", "not_dex", "not_int", "physical_affinity", "skeleton", "slashing_weapon", "undead", "very_slow_movement", },
+	monsterTags = { "bone_armour", "bones", "construct", "has_two_hand_sword", "has_two_handed_melee", "incursion_monster", "medium_height", "melee", "no_pantheon_mod", "not_dex", "not_int", "physical_affinity", "skeleton", "slashing_weapon", "undead", "very_slow_movement", },
 	baseDamageIgnoresAttackSpeed = true,
 	life = 2.25,
 	lifeScaling = "AltLife2",
@@ -3136,7 +3138,7 @@ minions["Metadata/Monsters/AtlasExiles/EyrieInfluenceMonsters/EyrieSeraphFighter
 -- Primal Crushclaw
 minions["Metadata/Monsters/LeagueHarvest/Blue/HarvestNessaCrabT3Spectre"] = {
 	name = "Primal Crushclaw",
-	monsterTags = { "animal_claw_weapon", "beast", "cold_affinity", "crustacean_beast", "hard_armour", "is_unarmed", "large_model", "melee", "not_dex", "not_int", "red_blood", "slow_movement", },
+	monsterTags = { "animal_claw_weapon", "beast", "cold_affinity", "crustacean_beast", "hard_armour", "harvest_tier3_monster", "is_unarmed", "large_model", "melee", "not_dex", "not_int", "red_blood", "slow_movement", },
 	life = 3.6,
 	lifeScaling = "AltLife2",
 	armour = 1,
@@ -3167,7 +3169,7 @@ minions["Metadata/Monsters/LeagueHarvest/Blue/HarvestNessaCrabT3Spectre"] = {
 -- Primal Rhex Matriarch
 minions["Metadata/Monsters/LeagueHarvest/Blue/HarvestRhexT3Spectre"] = {
 	name = "Primal Rhex Matriarch",
-	monsterTags = { "animal_claw_weapon", "beast", "caster", "fast_movement", "flesh_armour", "is_unarmed", "lightning_affinity", "melee", "not_int", "not_str", "physical_affinity", "red_blood", "reptile_beast", },
+	monsterTags = { "animal_claw_weapon", "beast", "caster", "fast_movement", "flesh_armour", "harvest_tier3_monster", "is_unarmed", "lightning_affinity", "melee", "not_int", "not_str", "physical_affinity", "red_blood", "reptile_beast", },
 	life = 3.57,
 	lifeScaling = "AltLife2",
 	evasion = 0.5,
@@ -7225,3 +7227,5 @@ minions["Metadata/Monsters/VaalMonsters/VaalOverseer"] = {
 	modList = {
 	},
 }
+	return minions
+end

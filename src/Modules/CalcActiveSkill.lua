@@ -3,7 +3,8 @@
 -- Module: Calc Active Skill
 -- Active skill setup.
 --
-local calcs = ...
+---@class Calcs
+local calcs = require("Modules.CalcBase")
 
 local pairs = pairs
 local ipairs = ipairs
@@ -80,6 +81,7 @@ end
 -- Create an active skill using the given active gem and list of support gems
 -- It will determine the base flag set, and check which of the support gems can support this skill
 function calcs.createActiveSkill(activeEffect, supportList, actor, socketGroup, summonSkill)
+	---@class ActiveSkill
 	local activeSkill = {
 		activeEffect = activeEffect,
 		supportList = supportList,
@@ -99,6 +101,7 @@ function calcs.createActiveSkill(activeEffect, supportList, actor, socketGroup, 
 	end
 
 	-- Initialise skill flag set ('attack', 'projectile', etc)
+	---@class SkillFlags
 	local skillFlags = copyTable(activeGrantedEffect.baseFlags)
 	activeSkill.skillFlags = skillFlags
 	skillFlags.hit = skillFlags.hit or activeSkill.skillTypes[SkillType.Attack] or activeSkill.skillTypes[SkillType.Damage] or activeSkill.skillTypes[SkillType.Projectile]
@@ -110,7 +113,7 @@ function calcs.createActiveSkill(activeEffect, supportList, actor, socketGroup, 
 	for index, supportEffect in ipairs(supportList) do
 		-- Pass 1: Add skill types from compatible supports
 		if supportEffect.grantedEffect.support then
-			if calcLib.canGrantedEffectSupportActiveSkill(supportEffect.grantedEffect, activeSkill) then
+			if calcLib.canGrantedEffectSupportActiveSkill(supportEffect.grantedEffect, activeSkill, nil, supportEffect.appliesToGrantedSkills) then
 				for _, skillType in pairs(supportEffect.grantedEffect.addSkillTypes) do
 					activeSkill.skillTypes[skillType] = true
 				end
@@ -128,7 +131,7 @@ function calcs.createActiveSkill(activeEffect, supportList, actor, socketGroup, 
 		for index, supportEffectIndex in ipairs(rejectedSupportsIndices) do
 			local supportEffect = supportList[supportEffectIndex]
 			if supportEffect.grantedEffect.support then
-				if calcLib.canGrantedEffectSupportActiveSkill(supportEffect.grantedEffect, activeSkill) then
+				if calcLib.canGrantedEffectSupportActiveSkill(supportEffect.grantedEffect, activeSkill, nil, supportEffect.appliesToGrantedSkills) then
 					notAddedNewSupport = false
 					rejectedSupportsIndices[index] = nil
 					for _, skillType in pairs(supportEffect.grantedEffect.addSkillTypes) do
@@ -142,7 +145,7 @@ function calcs.createActiveSkill(activeEffect, supportList, actor, socketGroup, 
 	for _, supportEffect in ipairs(supportList) do
 		-- Pass 2: Add all compatible supports
 		if supportEffect.grantedEffect.support then
-			if calcLib.canGrantedEffectSupportActiveSkill(supportEffect.grantedEffect, activeSkill) then
+			if calcLib.canGrantedEffectSupportActiveSkill(supportEffect.grantedEffect, activeSkill, nil, supportEffect.appliesToGrantedSkills) then
 				t_insert(activeSkill.effectList, supportEffect)
 				if supportEffect.isSupporting and activeEffect.srcInstance then
 					supportEffect.isSupporting[activeEffect.srcInstance] = true
@@ -178,14 +181,31 @@ function calcs.copyActiveSkill(env, mode, skill)
 	local newSkill = calcs.createActiveSkill(activeEffect, skill.supportList, skill.actor, skill.socketGroup, skill.summonSkill)
 	local newEnv, _, _, _ = calcs.initEnv(env.build, mode, env.override)
 	calcs.buildActiveSkillModList(newEnv, newSkill)
-	newSkill.skillModList = new("ModList", newSkill.baseSkillModList)
+	newSkill.skillModList = new("ModList"):ModList(newSkill.baseSkillModList)
 	if newSkill.minion then
-		newSkill.minion.modDB = new("ModDB")
+		newSkill.minion.modDB = new("ModDB"):ModDB()
 		newSkill.minion.modDB.actor = newSkill.minion
 		calcs.createMinionSkills(env, newSkill)
 		newSkill.skillPartName = newSkill.minion.mainSkill.activeEffect.grantedEffect.name
 	end
 	return newSkill, newEnv
+end
+
+-- Check for "asThoughUsing..." weaponTypes match, which is mechanically different from "countAs..."
+---@param weaponData table
+---@param types table
+---@return boolean @whether a match was found
+local function checkAsThoughWeaponTypes(weaponData, types)
+	if not weaponData.asThoughUsing then
+		return false
+	end
+	-- check if any 'usingKey' for which 'usingValue = true' is also true in types
+	for usingKey, usingValue in pairs(weaponData.asThoughUsing) do
+		if usingValue and types[usingKey] then
+			return true
+		end
+	end
+	return false
 end
 
 -- Get weapon flags and info for given weapon
@@ -197,7 +217,8 @@ local function getWeaponFlags(env, weaponData, weaponTypes)
 	if weaponTypes then
 		for _, types in ipairs(weaponTypes) do
 			if not types[weaponData.type] and
-			(not weaponData.countsAsAll1H or not (types["Claw"] or types["Dagger"] or types["One Handed Axe"] or types["One Handed Mace"] or types["One Handed Sword"])) then
+			(not weaponData.countsAsAll1H or not (types["Claw"] or types["Dagger"] or types["One Handed Axe"] or types["One Handed Mace"] or types["One Handed Sword"]))
+			and not checkAsThoughWeaponTypes(weaponData, types) then
 				return nil, info
 			end
 		end
@@ -270,6 +291,12 @@ function calcs.buildActiveSkillModList(env, activeSkill)
 		-- Skill requires a shield to be equipped
 		skillFlags.disable = true
 		activeSkill.disableReason = "This skill requires a Shield"
+	end
+
+	if skillTypes[SkillType.RequiresStaff] and not activeSkill.summonSkill and (not activeSkill.actor.itemList["Weapon 1"] or activeSkill.actor.itemList["Weapon 1"].type ~= "Staff") then
+		-- Skill requires a staff to be equipped
+		skillFlags.disable = true
+		activeSkill.disableReason = "This skill requires a Staff"
 	end
 
 	if skillFlags.shieldAttack then
@@ -451,6 +478,7 @@ function calcs.buildActiveSkillModList(env, activeSkill)
 	end
 
 	-- Build config structure for modifier searches
+	---@class ModCfg
 	activeSkill.skillCfg = {
 		flags = bor(skillModFlags, activeSkill.weapon1Flags or activeSkill.weapon2Flags or 0),
 		keywordFlags = skillKeywordFlags,
@@ -479,7 +507,7 @@ function calcs.buildActiveSkillModList(env, activeSkill)
 	end
 
 	-- Initialise skill modifier list
-	local skillModList = new("ModList", activeSkill.actor.modDB)
+	local skillModList = new("ModList"):ModList(activeSkill.actor.modDB)
 	activeSkill.skillModList = skillModList
 	activeSkill.baseSkillModList = skillModList
 	
@@ -542,16 +570,17 @@ function calcs.buildActiveSkillModList(env, activeSkill)
 	skillModList:NewMod("GemLevel", "BASE", activeSkill.activeEffect.srcInstance and activeSkill.activeEffect.srcInstance.level or activeSkill.activeEffect.level, "Max Level")
 	skillModList:NewMod("GemQuality", "BASE", activeSkill.activeEffect.srcInstance and activeSkill.activeEffect.srcInstance.quality or activeSkill.activeEffect.quality, "Max Quality")
 	-- matching socket bonus
-	local socketMatches = activeSkill.activeEffect.srcInstance and activeSkill.activeEffect.srcInstance.matchesSocket or activeSkill.activeEffect.matchesSocket
-	if socketMatches then
-		skillModList:NewMod("GemSocketQuality", "BASE", data.misc.MatchingSocketQualityBonus, "Socket Quality")
+	if (activeSkill.activeEffect.socketQuality or 0) > 0 then
+		skillModList:NewMod("GemSocketQuality", "BASE", activeSkill.activeEffect.socketQuality, "Socket Quality")
 	end
 	for _, supportProperty in ipairs(skillModList:Tabulate("LIST", activeSkill.skillCfg, "SupportedGemProperty")) do
 		local value = supportProperty.value
 		if value.keyword == "grants_active_skill" and activeSkill.activeEffect.gemData and not activeSkill.activeEffect.gemData.tags.support  then
-			-- save quality increases for use in tooltips
+			-- Save level and quality increases for use in tooltips
 			if value.key == "quality" then
 				activeEffect.supportQuality = (activeEffect.supportQuality or 0) + value.value
+			elseif value.key == "level" then
+				activeEffect.supportLevel = (activeEffect.supportLevel or 0) + value.value
 			end
 			activeEffect[value.key] = activeEffect[value.key] + value.value
 			skillModList:NewMod("GemSupport".. value.key:gsub("^%l", string.upper), "BASE", value.value, supportProperty.mod.source, #supportProperty.mod > 0 and supportProperty.mod[1] or nil)
@@ -560,7 +589,7 @@ function calcs.buildActiveSkillModList(env, activeSkill)
 
 	for _, gemProperty  in ipairs((activeSkill.activeEffect.gemPropertyInfo or {})) do
 		local value =  gemProperty.value
-		skillModList:NewMod("GemItem".. value.key:gsub("^%l", string.upper), "BASE", value.value, gemProperty.mod.source, #gemProperty.mod > 0 and gemProperty.mod[1] or nil)
+		skillModList:NewMod("Gem" .. gemProperty.sourceType .. value.key:gsub("^%l", string.upper), "BASE", value.value, gemProperty.mod.source, #gemProperty.mod > 0 and gemProperty.mod[1] or nil)
 	end
 
 	-- Add active gem modifiers

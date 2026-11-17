@@ -49,12 +49,51 @@ local function getFile(URL)
 	return #page > 0 and page
 end
 
-local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
+---@class PassiveTreeGroup
+---@field x number
+---@field y number
+---@field orbits integer[]
+---@field nodes string[]
+---@field background any
+---@field isProxy boolean?
+
+---@class PassiveTree
+---@field classes any[] A list of classes on the tree
+---@field alternate_ascendancies any[]?
+---@field tree "Default"|"DefaultAltAscendancies"
+---@field groups PassiveTreeGroup[]
+---@field nodes table<"root"|integer, Node>
+---@field jewelSlots integer[]
+---@field min_x integer
+---@field min_y integer
+---@field max_x integer
+---@field max_y integer
+---@field constants table<string, any>
+---@field points table<string, integer>
+local PassiveTreeClass = newClass("PassiveTree")
+
+---@param t table<string, any>
+---@return table<number|string, any>
+local function convertKeysToNumbers(t)
+	local keys = {}
+	for key, _ in pairs(t) do
+		table.insert(keys, key)
+	end
+	for _, key in ipairs(keys) do
+		local num = tonumber(key)
+		if num then
+			t[num] = t[key]
+			t[key] = nil
+		end
+	end
+	return t
+end
+function PassiveTreeClass:PassiveTree(treeVersion)
 	self.treeVersion = treeVersion
 	local versionNum = treeVersions[treeVersion].num
 
-	self.legion = LoadModule("Data/TimelessJewelData/LegionPassives")
-	self.tattoo = LoadModule("Data/TattooPassives")
+	self.legion = require("Data.TimelessJewelData.LegionPassives")
+	self.tattoo = require("Data.TattooPassives")
 
 	MakeDir("TreeData")
 
@@ -75,16 +114,25 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 			ConPrintf("Downloading passive tree data...")
 			page = getFile("https://www.pathofexile.com/passive-skill-tree")
 		end
-		local treeData = page:match("var passiveSkillTreeData = (%b{})")
-		if treeData then
-			treeText = "local tree=" .. jsonToLua(page:match("var passiveSkillTreeData = (%b{})"))
-			treeText = treeText .. "return tree"
-		else
-			treeText = "return " .. jsonToLua(page)
+		local treeData = page:match("var passiveSkillTreeData = (%b{})") or page
+		-- strip ggg tooltip tags
+		local dkjson = require("dkjson")
+		local utils = require("Modules.Utils")
+		local json = dkjson.decode(treeData)
+		for _, node in pairs(json.nodes) do
+			if node.masteryEffects then
+				for _, fx in ipairs(node.masteryEffects) do
+					for i, stat in ipairs(fx.stats) do
+						fx.stats[i] = escapeGGGString(stat)
+					end
+				end
+			end
 		end
-		treeFile = io.open("TreeData/"..treeVersion.."/tree.lua", "w")
-		treeFile:write(treeText)
-		treeFile:close()
+		-- convert node and group keys to numbers
+		convertKeysToNumbers(json.nodes)
+		convertKeysToNumbers(json.groups)
+		local _, contents = utils.saveTableToFile("TreeData/" .. treeVersion .. "/tree.lua", json, nil, true)
+		treeText = contents
 	end
 	for k, v in pairs(assert(loadstring(treeText))()) do
 		self[k] = v
@@ -209,8 +257,8 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 	end
 
 	if not self.assets then
-		self.assets = LoadModule("TreeData/3_19/Assets.lua")
-		self.assets = self.assets.assets
+		self.assets = require("TreeData.3_19.Assets")
+		self.assets = copyTable(self.assets.assets, true)
 		if self.alternate_ascendancies then
 			-- backgrounds
 			self.assets["ClassesPrimalist"] = {[0.3835]="https://web.poecdn.com/gen/image/WzIyLCJlMzIwYTYwYmNiZTY4ZmQ5YTc2NmE1ZmY4MzhjMDMyNCIseyJ0IjoyNywic3AiOjAuMzgzNX1d/3d68393250/ClassesPrimalist.png"}
@@ -364,7 +412,7 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 	end
 
 	-- Load legion sprite sheets and build sprite map
-	local legionSprites = LoadModule("TreeData/legion/tree-legion.lua")
+	local legionSprites = require("TreeData.legion.tree-legion")
 	local function loadLegionSheet(data)
 		local sheet = spriteSheets[data.filename]
 		if not sheet then
@@ -495,7 +543,9 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 	self.sockets = { }
 	self.masteryEffects = { }
 	local nodeMap = { }
-	for _, node in pairs(self.nodes) do
+	for _, n in pairs(self.nodes) do
+		---@class Node
+		local node = n
 		-- Migration...
 		if versionNum < 3.10 then
 			-- To new format
@@ -624,6 +674,28 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 				otherId = tonumber(otherId)
 			end
 			t_insert(node.linkedId, otherId)
+		end
+	end
+
+	-- Map each Large Jewel Socket to the proxy passives a Putrid Seed grows from it
+	local blightcoreNodes = { }
+	for _, node in pairs(self.nodes) do
+		if node.proxyKey and node.proxyKey:match("^Blightcore") then
+			-- group by proxy key (e.g. "BlightcoreTopRight")
+			blightcoreNodes[node.proxyKey] = blightcoreNodes[node.proxyKey] or { }
+			t_insert(blightcoreNodes[node.proxyKey], node)
+		end
+	end
+	-- a table describing what putrid seed proxy nodes are attached to each
+	self.blightcoreLayouts = { }
+	for _, layout in pairs(blightcoreNodes) do
+		for _, node in ipairs(layout) do
+			for _, otherId in ipairs(node.linkedId) do
+				-- link the proxy nodes to the large jewel socket node
+				if self.sockets[otherId] then
+					self.blightcoreLayouts[otherId] = layout
+				end
+			end
 		end
 	end
 
@@ -764,14 +836,15 @@ local PassiveTreeClass = newClass("PassiveTree", function(self, treeVersion)
 	if treeVersion == latestTreeVersion then
 		buildTreeDependentUniques(self)
 	end
-end)
+	return self
+end
 
 function PassiveTreeClass:ProcessStats(node, startIndex)
 	startIndex = startIndex or 1
 	if startIndex == 1 then
 		node.modKey = ""
 		node.mods = { }
-		node.modList = new("ModList")
+		node.modList = new("ModList"):ModList()
 	end
 
 	if not node.sd then
@@ -804,7 +877,7 @@ function PassiveTreeClass:ProcessStats(node, startIndex)
 				if list and not extra then
 					-- Success, add dummy mod lists to the other lines that were combined with this one
 					for ci = i + 1, endI do
-						node.mods[ci] = { list = { } }
+						node.mods[ci] = { list = {}, combined = true }
 					end
 					break
 				end

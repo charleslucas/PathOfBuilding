@@ -4,25 +4,70 @@ describe("TestItemParse", function()
 		return "Rarity: Rare\nName\n"..base.."\n"..s
 	end
 
+	it("pastes Viscera names and implicit rolls without adding item descriptions as modifiers", function()
+		newBuild()
+		local cases = {
+			{ "Greater Gladiator's Heart", "Gladiator's Heart", "Greater ", "Torso" }, -- Live clipboard sample.
+			{ "Lesser Gladiator's Heart", "Gladiator's Heart", "Lesser ", "Torso" }, -- Synthetic unlisted name.
+			{ "Gladiator's Heart", "Gladiator's Heart", "", "Torso" },
+			{ "Greater Sirus' Head", "Sirus' Head", "Greater ", "Head" }, -- Exact base takes precedence.
+			{ "Experimental Gladiator's Heart", "Gladiator's Heart", "Experimental ", "Torso" }, -- Synthetic unknown prefix.
+			{ "Lesser Warden's Arm", "Warden's Arm", "Lesser ", "Upper Limb" },
+			{ "Lesser Pocked Leg", "Pocked Leg", "Lesser ", "Lower Limb" },
+		}
+		for _, example in ipairs(cases) do
+			local text = "Item Class: Viscera\n" .. example[1] .. "\n" .. [[
+--------
+]] .. example[4] .. "\n" .. [[
+--------
+Item Level: 69
+--------
+{ Implicit Modifier }
++6(5-7) to Maximum Rage
+(Every Rage grants 1% more Attack Damage. Maximum Rage is 30. Lose 10 Rage per second if you have not been Hit or gained Rage in the last 2 seconds)
+--------
+Take this to the Wickerman in a town or hideout to attach it.
+]]
+			build.itemsTab.displayItem = nil
+			build.itemsTab:CreateDisplayItemFromRaw(text, true)
+			local item = assert(build.itemsTab.displayItem)
+			assert.equals("NORMAL", item.rarity)
+			assert.equals(example[1], item.name)
+			assert.equals(example[2], item.baseName)
+			assert.equals(example[3], item.namePrefix)
+			assert.equals("Viscera", item.type)
+			assert.equals(69, item.itemLevel)
+			assert.equals(1, #item.implicitModLines)
+			assert.equals("+(5-7) to Maximum Rage", item.implicitModLines[1].line)
+			assert.equals(0.5, item.implicitModLines[1].range)
+			assert.equals(0, #item.explicitModLines)
+			local saved = new("Item"):Item(item:BuildRaw())
+			assert.equals(example[1], saved.name)
+			assert.equals(example[2], saved.baseName)
+			assert.equals(1, #saved.implicitModLines)
+			assert.equals(0.5, saved.implicitModLines[1].range)
+		end
+	end)
+
 	it("Rarity", function()
-		local item = new("Item", "Rarity: Normal\nCoral Ring")
+		local item = new("Item"):Item("Rarity: Normal\nCoral Ring")
 		assert.are.equals("NORMAL", item.rarity)
-		item = new("Item", "Rarity: Magic\nCoral Ring")
+		item = new("Item"):Item("Rarity: Magic\nCoral Ring")
 		assert.are.equals("MAGIC", item.rarity)
-		item = new("Item", "Rarity: Rare\nName\nCoral Ring")
+		item = new("Item"):Item("Rarity: Rare\nName\nCoral Ring")
 		assert.are.equals("RARE", item.rarity)
-		item = new("Item", "Rarity: Unique\nName\nCoral Ring")
+		item = new("Item"):Item("Rarity: Unique\nName\nCoral Ring")
 		assert.are.equals("UNIQUE", item.rarity)
-		item = new("Item", "Rarity: Unique\nName\nCoral Ring\nFoil Unique (Verdant)")
+		item = new("Item"):Item("Rarity: Unique\nName\nCoral Ring\nFoil Unique (Verdant)")
 		assert.are.equals("RELIC", item.rarity)
 	end)
 
 	it("Superior/Synthesised", function()
-		local item = new("Item", raw("", "Superior Plate Vest"))
+		local item = new("Item"):Item(raw("", "Superior Plate Vest"))
 		assert.are.equals("Plate Vest", item.baseName)
-		item = new("Item", raw("", "Synthesised Plate Vest"))
+		item = new("Item"):Item(raw("", "Synthesised Plate Vest"))
 		assert.are.equals("Plate Vest", item.baseName)
-		item = new("Item", raw("", "Superior Synthesised Plate Vest"))
+		item = new("Item"):Item(raw("", "Superior Synthesised Plate Vest"))
 		assert.are.equals("Plate Vest", item.baseName)
 	end)
 
@@ -38,7 +83,7 @@ describe("TestItemParse", function()
 			cannotBeAnointed = true,
 		}
 
-		local item = new("Item", "Rarity: Normal\n" .. baseName)
+		local item = new("Item"):Item("Rarity: Normal\n" .. baseName)
 
 		assert.are.equals(1, #item.enchantModLines)
 		assert.are.equals("+10 to Strength", item.enchantModLines[1].line)
@@ -54,19 +99,63 @@ describe("TestItemParse", function()
 		data.itemBases[baseName] = nil
 	end)
 
+	it("keeps saved rolls on their lines for a talisman saved before its base enchant", function()
+		local baseName = "Test Talisman"
+		data.itemBases[baseName] = {
+			type = "Amulet",
+			subType = "Talisman",
+			tags = { amulet = true, talisman = true },
+			req = { },
+			enchant = "+10 to Strength",
+		}
+		loadBuildFromXML([[
+<PathOfBuilding>
+	<Build level="1" targetVersion="3_0" className="Scion" ascendClassName="None" mainSocketGroup="1"/>
+	<Items activeItemSet="1">
+		<Item id="1">
+Rarity: RARE
+Old Save
+Test Talisman
+Implicits: 1
++(10-20) to Dexterity
+			<ModRange id="1" range="1"/>
+		</Item>
+		<ItemSet id="1"/>
+	</Items>
+</PathOfBuilding>]])
+		data.itemBases[baseName] = nil
+
+		assert.are.equals(1, build.itemsTab.items[1].implicitModLines[1].range)
+	end)
+
+	it("does not add a talisman base enchant already saved as an implicit", function()
+		local baseName = "Test Talisman"
+		data.itemBases[baseName] = {
+			type = "Amulet",
+			subType = "Talisman",
+			tags = { amulet = true, talisman = true },
+			req = { },
+			enchant = "+10 to Strength",
+		}
+		local item = new("Item"):Item("Rarity: Normal\n" .. baseName .. "\nImplicits: 1\n+10 to Strength")
+		data.itemBases[baseName] = nil
+
+		assert.are.equals(0, #item.enchantModLines)
+	end)
+
 	it("Two-Toned Boots", function()
-		local item = new("Item", raw("", "Two-Toned Boots"))
+		local item = new("Item"):Item(raw("", "Two-Toned Boots"))
 		assert.are.equals("Two-Toned Boots (Armour/Energy Shield)", item.baseName)
-		item = new("Item", raw("Armour: 10\nEnergy Shield: 10", "Two-Toned Boots"))
+		item = new("Item"):Item(raw("Armour: 10\nEnergy Shield: 10", "Two-Toned Boots"))
 		assert.are.equals("Two-Toned Boots (Armour/Energy Shield)", item.baseName)
-		item = new("Item", raw("Armour: 10\nEvasion Rating: 10", "Two-Toned Boots"))
+		item = new("Item"):Item(raw("Armour: 10\nEvasion Rating: 10", "Two-Toned Boots"))
 		assert.are.equals("Two-Toned Boots (Armour/Evasion)", item.baseName)
-		item = new("Item", raw("Evasion Rating: 10\nEnergy Shield: 10", "Two-Toned Boots"))
+		item = new("Item"):Item(raw("Evasion Rating: 10\nEnergy Shield: 10", "Two-Toned Boots"))
 		assert.are.equals("Two-Toned Boots (Evasion/Energy Shield)", item.baseName)
 	end)
 
 	it("Magic Two-Toned Boots", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Magic
 			Stalwart Two-Toned Boots of Plunder
 			Armour: 100
@@ -75,7 +164,7 @@ describe("TestItemParse", function()
 		assert.are.equal("Two-Toned Boots (Armour/Energy Shield)", item.baseName)
 		assert.are.equal("Stalwart ", item.namePrefix)
 		assert.are.equal(" of Plunder", item.nameSuffix)
-		item = new("Item", [[
+		item = new("Item"):Item([[
 			Rarity: Magic
 			Sanguine Two-Toned Boots of the Phoenix
 			Armour: 100
@@ -84,7 +173,7 @@ describe("TestItemParse", function()
 		assert.are.equal("Two-Toned Boots (Armour/Evasion)", item.baseName)
 		assert.are.equal("Sanguine ", item.namePrefix)
 		assert.are.equal(" of the Phoenix", item.nameSuffix)
-		item = new("Item", [[
+		item = new("Item"):Item([[
 			Rarity: Magic
 			Stout Two-Toned Boots of the Lightning
 			Evasion Rating: 100
@@ -96,7 +185,7 @@ describe("TestItemParse", function()
 	end)
 
 	it("Title", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Rare
 			Phoenix Paw
 			Iron Gauntlets
@@ -107,24 +196,24 @@ describe("TestItemParse", function()
 	end)
 
 	it("Unique ID", function()
-		local item = new("Item", raw("Unique ID: 40f9711d5bd7ad2bcbddaf71c705607aef0eecd3dcadaafec6c0192f79b82863"))
+		local item = new("Item"):Item(raw("Unique ID: 40f9711d5bd7ad2bcbddaf71c705607aef0eecd3dcadaafec6c0192f79b82863"))
 		assert.are.equals("40f9711d5bd7ad2bcbddaf71c705607aef0eecd3dcadaafec6c0192f79b82863", item.uniqueID)
 	end)
 
 	it("Item Level", function()
-		local item = new("Item", raw("Item Level: 10"))
+		local item = new("Item"):Item(raw("Item Level: 10"))
 		assert.are.equals(10, item.itemLevel)
 	end)
 
 	it("Quality", function()
-		local item = new("Item", raw("Quality: 10"))
+		local item = new("Item"):Item(raw("Quality: 10"))
 		assert.are.equals(10, item.quality)
-		item = new("Item", raw("Quality: +12% (augmented)"))
+		item = new("Item"):Item(raw("Quality: +12% (augmented)"))
 		assert.are.equals(12, item.quality)
 	end)
 
 	it("Sockets", function()
-		local item = new("Item", raw("Sockets: R-G R-B-W A"))
+		local item = new("Item"):Item(raw("Sockets: R-G R-B-W A"))
 		assert.are.same({
 			{ color = "R", group = 0 },
 			{ color = "G", group = 0 },
@@ -136,18 +225,18 @@ describe("TestItemParse", function()
 	end)
 
 	it("Jewel", function()
-		local item = new("Item", raw("Radius: Large\nLimited to: 2", "Cobalt Jewel"))
+		local item = new("Item"):Item(raw("Radius: Large\nLimited to: 2", "Cobalt Jewel"))
 		assert.are.equals("Large", item.jewelRadiusLabel)
 		assert.are.equals(2, item.limit)
 	end)
 
 	it("Variant name", function()
-		local item = new("Item", raw("Variant: Pre 3.19.0\nVariant: Current"))
+		local item = new("Item"):Item(raw("Variant: Pre 3.19.0\nVariant: Current"))
 		assert.are.same({ "Pre 3.19.0", "Current" }, item.variantList)
 	end)
 
 	it("Versioned grouped variants", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: UNIQUE
 			Versioned Grouped Test
 			Prismatic Ring
@@ -201,46 +290,195 @@ describe("TestItemParse", function()
 		assert.matches("{version:1}{variant:1}{group:1}", item.raw, 1, true)
 	end)
 
+	describe("3.30 unique selections", function()
+		local function unique(name)
+			for _, typeList in pairs(data.uniques) do
+				for _, itemRaw in pairs(typeList) do
+					if itemRaw:match("^%s*([^\r\n]+)") == name then
+						return new("Item"):Item(itemRaw, "UNIQUE")
+					end
+				end
+			end
+			error("Unique not found: " .. name)
+		end
+
+		local function activeMods(item)
+			local lines = { }
+			for _, modLine in ipairs(item.explicitModLines) do
+				if item:CheckModLineVariant(modLine) then
+					table.insert(lines, modLine.line)
+				end
+			end
+			return lines, table.concat(lines, "\n")
+		end
+
+		it("keeps Doryani's four current mod pools independent and restores legacy bundles", function()
+			local item = unique("Doryani's Invitation")
+			assert.are.equal(3, item.selectedVersion)
+			for group = 1, 4 do
+				local first = (group - 1) * 4 + 1
+				assert.are.same({ first, first + 1, first + 2, first + 3 }, item:GetVariantGroupOptions(group, false))
+			end
+			for damage = 1, 4 do
+				for defence = 5, 8 do
+					for leech = 9, 12 do
+						for flask = 13, 16 do
+							item.variantGroupSelections = { damage, defence, leech, flask }
+							item:NormaliseVariantSelections()
+							assert.are.equal(4, #activeMods(item))
+						end
+					end
+				end
+			end
+			item.selectedVersion = 2
+			item.variantGroupSelections[1] = 2
+			item:NormaliseVariantSelections()
+			assert.are.same({ }, item:GetVariantGroupOptions(2, false))
+			local lines, text = activeMods(item)
+			assert.are.equal(6, #lines)
+			assert.matches("0.6% of Fire Damage Leeched as Life", text, 1, true)
+			assert.matches("(20-30)% chance to Ignite", text, 1, true)
+			assert.is_nil(text:find("Flasks applied", 1, true))
+			item.selectedVersion = 1
+			item:NormaliseVariantSelections()
+			local _, oldText = activeMods(item)
+			assert.matches("0.2% of Fire Damage Leeched as Life", oldText, 1, true)
+			item.selectedVersion = 3
+			item:BuildAndParseRaw()
+			assert.are.equal(4, #activeMods(item))
+		end)
+
+		it("selects four different Femurs modifiers without leaking current mods into old versions", function()
+			local item = unique("Femurs of the Saints")
+			assert.are.equal(5, item.selectedVersion)
+			assert.are.equal(6, #activeMods(item))
+			item.variantGroupSelections = { 7, 7, 7, 7 }
+			item:NormaliseVariantSelections()
+			local seen = { }
+			for group = 1, 4 do
+				local selected = item.variantGroupSelections[group]
+				assert.is_nil(seen[selected])
+				seen[selected] = true
+				assert.are.equal(4, #item:GetVariantGroupOptions(group, true))
+			end
+			item.selectedVersion = 4
+			item:BuildAndParseRaw()
+			assert.are.same({ }, item:GetVariantGroupOptions(1, false))
+			local lines, text = activeMods(item)
+			assert.are.equal(6, #lines)
+			assert.matches("Regenerate 0.6% of Life", text, 1, true)
+			assert.matches("30% increased Mana Regeneration Rate", text, 1, true)
+			assert.is_nil(text:find("increased Spell Damage per Summoned Skeleton", 1, true))
+		end)
+
+		it("allows only one Doedre ailment and no new ailment on the legacy version", function()
+			local item = unique("Doedre's Tongue")
+			assert.are.equal(2, item.selectedVersion)
+			for variant, ailment in ipairs({ "Ignite", "Shock", "Freeze" }) do
+				item.variantGroupSelections[1] = variant
+				item:BuildAndParseRaw()
+				local lines, text = activeMods(item)
+				assert.are.equal(4, #lines)
+				assert.matches("All Damage can " .. ailment .. " against Cursed Enemies", text, 1, true)
+			end
+			item.selectedVersion = 1
+			item:BuildAndParseRaw()
+			assert.are.same({ }, item:GetVariantGroupOptions(1, false))
+			assert.are.equal(3, #activeMods(item))
+		end)
+
+		it("pairs each Ralakesh charge penalty with its matching maximum-charge modifier", function()
+			local item = unique("Ralakesh's Impatience")
+			assert.are.equal(4, item.selectedVersion)
+			for variant, charge in ipairs({ "Endurance", "Frenzy", "Power" }) do
+				item.variantGroupSelections[1] = variant
+				item:BuildAndParseRaw()
+				local lines, text = activeMods(item)
+				assert.are.equal(6, #lines)
+				assert.matches("-1 to Maximum " .. charge .. " Charges", text, 1, true)
+				assert.matches("Count as having maximum number of " .. charge .. " Charges", text, 1, true)
+			end
+			item.selectedVersion = 3
+			item:BuildAndParseRaw()
+			local lines, text = activeMods(item)
+			assert.are.equal(5, #lines)
+			assert.is_nil(text:find("-1 to Maximum", 1, true))
+			item.selectedVersion = 2
+			item:BuildAndParseRaw()
+			assert.are.same({ }, item:GetVariantGroupOptions(1, false))
+			assert.are.equal(5, #activeMods(item))
+		end)
+
+		it("keeps Atziri's new leech and recovery restrictions out of legacy versions", function()
+			local item = unique("Atziri's Acuity")
+			assert.are.equal(4, item.selectedVersion)
+			local _, text = activeMods(item)
+			assert.matches("Life Leech from Critical Strikes is instant", text, 1, true)
+			assert.matches("You cannot Regenerate or Recoup Life", text, 1, true)
+			assert.is_nil(text:find("Vaal Pact", 1, true))
+			item.selectedVersion = 3
+			item:BuildAndParseRaw()
+			local _, oldText = activeMods(item)
+			assert.matches("You have Vaal Pact", oldText, 1, true)
+			assert.is_nil(oldText:find("Recoup", 1, true))
+		end)
+
+		it("keeps Rotmother's resistance choice when changing light-radius versions", function()
+			local item = unique("Rotmother's Mutiny")
+			item.variantGroupSelections[1] = 2
+			item.selectedVersion = 1
+			item:BuildAndParseRaw()
+			local _, oldText = activeMods(item)
+			assert.matches("(25-75)% increased Light Radius", oldText, 1, true)
+			item.selectedVersion = 2
+			item:BuildAndParseRaw()
+			local _, text = activeMods(item)
+			assert.matches("(20-40)% increased Light Radius", text, 1, true)
+			assert.matches("+1% to Chaos Resistance per 1% Cold Resistance", text, 1, true)
+			assert.are.equal(2, item.variantGroupSelections[1])
+		end)
+	end)
+
 	it("Talisman Tier", function()
-		local item = new("Item", raw("Talisman Tier: 3", "Rotfeather Talisman"))
+		local item = new("Item"):Item(raw("Talisman Tier: 3", "Rotfeather Talisman"))
 		assert.are.equals(3, item.talismanTier)
 	end)
 
 	it("Defence", function()
-		local item = new("Item", raw("Armour: 25"))
+		local item = new("Item"):Item(raw("Armour: 25"))
 		assert.are.equals(25, item.armourData.Armour)
-		item = new("Item", raw("Armour: 25 (augmented)"))
+		item = new("Item"):Item(raw("Armour: 25 (augmented)"))
 		assert.are.equals(25, item.armourData.Armour)
-		item = new("Item", raw("Evasion Rating: 35", "Shabby Jerkin"))
+		item = new("Item"):Item(raw("Evasion Rating: 35", "Shabby Jerkin"))
 		assert.are.equals(35, item.armourData.Evasion)
-		item = new("Item", raw("Energy Shield: 15", "Simple Robe"))
+		item = new("Item"):Item(raw("Energy Shield: 15", "Simple Robe"))
 		assert.are.equals(15, item.armourData.EnergyShield)
-		item = new("Item", raw("Ward: 180", "Runic Crown"))
+		item = new("Item"):Item(raw("Ward: 180", "Runic Crown"))
 		assert.are.equals(180, item.armourData.Ward)
 	end)
 
 	it("Defence BasePercentile", function()
-		local item = new("Item", raw("ArmourBasePercentile: 0.5"))
+		local item = new("Item"):Item(raw("ArmourBasePercentile: 0.5"))
 		assert.are.equals(0.5, item.armourData.ArmourBasePercentile)
-		item = new("Item", raw("EvasionBasePercentile: 0.6", "Shabby Jerkin"))
+		item = new("Item"):Item(raw("EvasionBasePercentile: 0.6", "Shabby Jerkin"))
 		assert.are.equals(0.6, item.armourData.EvasionBasePercentile)
-		item = new("Item", raw("EnergyShieldBasePercentile: 0.7", "Simple Robe"))
+		item = new("Item"):Item(raw("EnergyShieldBasePercentile: 0.7", "Simple Robe"))
 		assert.are.equals(0.7, item.armourData.EnergyShieldBasePercentile)
-		item = new("Item", raw("WardBasePercentile: 0.8", "Runic Crown"))
+		item = new("Item"):Item(raw("WardBasePercentile: 0.8", "Runic Crown"))
 		assert.are.equals(0.8, item.armourData.WardBasePercentile)
 	end)
 
 	it("Requires Level", function()
-		local item = new("Item", raw("Requires Level 10"))
+		local item = new("Item"):Item(raw("Requires Level 10"))
 		assert.are.equals(10, item.requirements.level)
-		item = new("Item", raw("Level: 10"))
+		item = new("Item"):Item(raw("Level: 10"))
 		assert.are.equals(10, item.requirements.level)
-		item = new("Item", raw("LevelReq: 10"))
+		item = new("Item"):Item(raw("LevelReq: 10"))
 		assert.are.equals(10, item.requirements.level)
 	end)
 
 	it("Alt Variant", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Has Alt Variant: true
 			Has Alt Variant Two: true
 			Has Alt Variant Three: true
@@ -267,7 +505,7 @@ describe("TestItemParse", function()
 	end)
 
 	it("Prefix/Suffix", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Prefix: {range:0.1}IncreasedLife1
 			Suffix: {range:0.2}ColdResist1
 			]]))
@@ -278,7 +516,7 @@ describe("TestItemParse", function()
 	end)
 
 	it("Implicits", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Implicits: 2
 			+8 to Strength
 			+10 to Intelligence
@@ -292,38 +530,38 @@ describe("TestItemParse", function()
 	end)
 
 	it("League", function()
-		local item = new("Item", raw("League: Heist"))
+		local item = new("Item"):Item(raw("League: Heist"))
 		assert.are.equals("Heist", item.league)
 	end)
 
 	it("Source", function()
-		local item = new("Item", raw("Source: No longer obtainable"))
+		local item = new("Item"):Item(raw("Source: No longer obtainable"))
 		assert.are.equals("No longer obtainable", item.source)
 	end)
 
 	it("Note", function()
-		local item = new("Item", raw("Note: ~price 1 chaos"))
+		local item = new("Item"):Item(raw("Note: ~price 1 chaos"))
 		assert.are.equals("~price 1 chaos", item.note)
 	end)
 
 	it("Attribute Requirements", function()
-		local item = new("Item", raw("Dex: 100"))
+		local item = new("Item"):Item(raw("Dex: 100"))
 		assert.are.equals(100, item.requirements.dex)
-		item = new("Item", raw("Int: 101"))
+		item = new("Item"):Item(raw("Int: 101"))
 		assert.are.equals(101, item.requirements.int)
-		item = new("Item", raw("Str: 102"))
+		item = new("Item"):Item(raw("Str: 102"))
 		assert.are.equals(102, item.requirements.str)
 	end)
 
 	it("Requires Class", function()
-		local item = new("Item", raw("Requires Class Witch"))
+		local item = new("Item"):Item(raw("Requires Class Witch"))
 		assert.are.equals("Witch", item.classRestriction)
-		item = new("Item", raw("Class:: Witch"))
+		item = new("Item"):Item(raw("Class:: Witch"))
 		assert.are.equals("Witch", item.classRestriction)
 	end)
 
 	it("Requires Class variant", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Selected Variant: 2
 			+8 to Strength
 			{variant:1}Requires Class Witch
@@ -334,75 +572,75 @@ describe("TestItemParse", function()
 	end)
 
 	it("Influence", function()
-		local item = new("Item", raw("Shaper Item"))
+		local item = new("Item"):Item(raw("Shaper Item"))
 		assert.truthy(item.shaper)
-		item = new("Item", raw("Elder Item"))
+		item = new("Item"):Item(raw("Elder Item"))
 		assert.truthy(item.elder)
-		item = new("Item", raw("Warlord Item"))
+		item = new("Item"):Item(raw("Warlord Item"))
 		assert.truthy(item.adjudicator)
-		item = new("Item", raw("Hunter Item"))
+		item = new("Item"):Item(raw("Hunter Item"))
 		assert.truthy(item.basilisk)
-		item = new("Item", raw("Crusader Item"))
+		item = new("Item"):Item(raw("Crusader Item"))
 		assert.truthy(item.crusader)
-		item = new("Item", raw("Redeemer Item"))
+		item = new("Item"):Item(raw("Redeemer Item"))
 		assert.truthy(item.eyrie)
-		item = new("Item", raw("Searing Exarch Item"))
+		item = new("Item"):Item(raw("Searing Exarch Item"))
 		assert.truthy(item.cleansing)
-		item = new("Item", raw("Eater of Worlds Item"))
+		item = new("Item"):Item(raw("Eater of Worlds Item"))
 		assert.truthy(item.tangle)
 	end)
 
 	it("short flags", function()
-		local item = new("Item", raw("Split"))
+		local item = new("Item"):Item(raw("Split"))
 		assert.truthy(item.split)
-		item = new("Item", raw("Mirrored"))
+		item = new("Item"):Item(raw("Mirrored"))
 		assert.truthy(item.mirrored)
-		item = new("Item", raw("Corrupted"))
+		item = new("Item"):Item(raw("Corrupted"))
 		assert.truthy(item.corrupted)
-		item = new("Item", raw("Fractured Item"))
+		item = new("Item"):Item(raw("Fractured Item"))
 		assert.truthy(item.fractured)
-		item = new("Item", raw("Synthesised Item"))
+		item = new("Item"):Item(raw("Synthesised Item"))
 		assert.truthy(item.synthesised)
-		item = new("Item", raw("Crafted: true"))
+		item = new("Item"):Item(raw("Crafted: true"))
 		assert.truthy(item.crafted)
-		item = new("Item", raw("Unreleased: true"))
+		item = new("Item"):Item(raw("Unreleased: true"))
 		assert.truthy(item.unreleased)
 	end)
 
 	it("long flags", function()
-		local item = new("Item", raw("This item can be anointed by Cassia"))
+		local item = new("Item"):Item(raw("This item can be anointed by Cassia"))
 		assert.truthy(item.canBeAnointed)
-		item = new("Item", raw("Can have a second Enchantment Modifier"))
+		item = new("Item"):Item(raw("Can have a second Enchantment Modifier"))
 		assert.truthy(item.canHaveTwoEnchants)
-		item = new("Item", raw("Can have 1 additional Enchantment Modifiers"))
+		item = new("Item"):Item(raw("Can have 1 additional Enchantment Modifiers"))
 		assert.truthy(item.canHaveTwoEnchants)
-		item = new("Item", raw("Can have 2 additional Enchantment Modifiers"))
+		item = new("Item"):Item(raw("Can have 2 additional Enchantment Modifiers"))
 		assert.truthy(item.canHaveTwoEnchants)
 		assert.truthy(item.canHaveThreeEnchants)
-		item = new("Item", raw("Can have 3 additional Enchantment Modifiers"))
+		item = new("Item"):Item(raw("Can have 3 additional Enchantment Modifiers"))
 		assert.truthy(item.canHaveTwoEnchants)
 		assert.truthy(item.canHaveThreeEnchants)
 		assert.truthy(item.canHaveFourEnchants)
-		item = new("Item", raw("Has a Crucible Passive Skill Tree with only Support Passive Skills"))
+		item = new("Item"):Item(raw("Has a Crucible Passive Skill Tree with only Support Passive Skills"))
 		assert.truthy(item.canHaveOnlySupportSkillsCrucibleTree)
-		item = new("Item", raw("Has a Crucible Passive Skill Tree"))
+		item = new("Item"):Item(raw("Has a Crucible Passive Skill Tree"))
 		assert.truthy(item.canHaveShieldCrucibleTree)
-		item = new("Item", raw("Has a Two Handed Sword Crucible Passive Skill Tree"))
+		item = new("Item"):Item(raw("Has a Two Handed Sword Crucible Passive Skill Tree"))
 		assert.truthy(item.canHaveTwoHandedSwordCrucibleTree)
 	end)
 	
 	it("tags", function()
-		local item = new("Item", raw("{tags:life,physical_damage}+8 to Strength"))
+		local item = new("Item"):Item(raw("{tags:life,physical_damage}+8 to Strength"))
 		assert.are.same({ "life", "physical_damage" }, item.explicitModLines[1].modTags)
 	end)
 
 	it("ignores disabled modifiers in item conditions", function()
-		local item = new("Item", raw("{disabled}+100 to maximum Life"))
+		local item = new("Item"):Item(raw("{disabled}+100 to maximum Life"))
 		assert.is_false(item:FindModifierSubstring("life", "body armour"))
 	end)
 
 	it("variant", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Selected Variant: 2
 			{variant:1}+8 to Strength
 			{variant:2,3}+10 to Strength
@@ -414,37 +652,37 @@ describe("TestItemParse", function()
 	end)
 
 	it("range", function()
-		local item = new("Item", raw("{range:0.8}+(8-12) to Strength"))
+		local item = new("Item"):Item(raw("{range:0.8}+(8-12) to Strength"))
 		assert.are.equals(0.8, item.explicitModLines[1].range)
 		assert.are.equals(11, item.baseModList[1].value) -- range 0.8 of (8-12) = 11
 	end)
 
 	it("crafted", function()
-		local item = new("Item", raw("{crafted}+8 to Strength"))
+		local item = new("Item"):Item(raw("{crafted}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].crafted)
-		item = new("Item", raw("+8 to Strength (crafted)"))
+		item = new("Item"):Item(raw("+8 to Strength (crafted)"))
 		assert.truthy(item.explicitModLines[1].crafted)
 	end)
 
 	it("crucible", function()
-		local item = new("Item", raw("{crucible}+8 to Strength"))
+		local item = new("Item"):Item(raw("{crucible}+8 to Strength"))
 		assert.truthy(item.crucibleModLines[1].crucible)
-		item = new("Item", raw("+8 to Strength (crucible)"))
+		item = new("Item"):Item(raw("+8 to Strength (crucible)"))
 		assert.truthy(item.crucibleModLines[1].crucible)
 	end)
 
 	it("custom", function()
-		local item = new("Item", raw("{custom}+8 to Strength"))
+		local item = new("Item"):Item(raw("{custom}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].custom)
 	end)
 
 	it("eater", function()
-		local item = new("Item", raw("{eater}+8 to Strength"))
+		local item = new("Item"):Item(raw("{eater}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].eater)
 	end)
 
 	it("enchant", function()
-		local item = new("Item", raw("+8 to Strength (enchant)"))
+		local item = new("Item"):Item(raw("+8 to Strength (enchant)"))
 		assert.are.equals(1, #item.enchantModLines)
 		-- enchant also sets crafted and implicit
 		assert.truthy(item.enchantModLines[1].crafted)
@@ -452,43 +690,43 @@ describe("TestItemParse", function()
 	end)
 
 	it("exarch", function()
-		local item = new("Item", raw("{exarch}+8 to Strength"))
+		local item = new("Item"):Item(raw("{exarch}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].exarch)
 	end)
 
 	it("fractured", function()
-		local item = new("Item", raw("{fractured}+8 to Strength"))
+		local item = new("Item"):Item(raw("{fractured}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].fractured)
-		item = new("Item", raw("+8 to Strength (fractured)"))
+		item = new("Item"):Item(raw("+8 to Strength (fractured)"))
 		assert.truthy(item.explicitModLines[1].fractured)
 	end)
 
 	it("implicit", function()
-		local item = new("Item", raw("+8 to Strength (implicit)"))
+		local item = new("Item"):Item(raw("+8 to Strength (implicit)"))
 		assert.truthy(item.implicitModLines[1].implicit)
 	end)
 
 	it("scourge", function()
-		local item = new("Item", raw("{scourge}+8 to Strength"))
+		local item = new("Item"):Item(raw("{scourge}+8 to Strength"))
 		assert.truthy(item.scourgeModLines[1].scourge)
-		item = new("Item", raw("+8 to Strength (scourge)"))
+		item = new("Item"):Item(raw("+8 to Strength (scourge)"))
 		assert.truthy(item.scourgeModLines[1].scourge)
 	end)
 
 	it("synthesis", function()
-		local item = new("Item", raw("{synthesis}+8 to Strength"))
+		local item = new("Item"):Item(raw("{synthesis}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].synthesis)
 	end)
 
 	it("unscalable", function()
-		local item = new("Item", raw("{unscalable}+8 to Strength"))
+		local item = new("Item"):Item(raw("{unscalable}+8 to Strength"))
 		assert.truthy(item.explicitModLines[1].unscalable)
-		item = new("Item", raw("+8 to Strength - Unscalable Value"))
+		item = new("Item"):Item(raw("+8 to Strength - Unscalable Value"))
 		assert.truthy(item.explicitModLines[1].unscalable)
 	end)
 
 	it("multiple bases", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Ashcaller
 			Selected Variant: 3
 			{variant:1,2,3}Quartz Wand
@@ -500,7 +738,7 @@ describe("TestItemParse", function()
 			}, item.baseLines)
 		assert.are.equals("Quartz Wand", item.baseName)
 
-		item = new("Item", [[
+		item = new("Item"):Item([[
 			Ashcaller
 			Selected Variant: 4
 			{variant:1,2,3}Quartz Wand
@@ -510,7 +748,7 @@ describe("TestItemParse", function()
 	end)
 
 	it("parses text without armour value then changes quality and has correct final armour", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 				Armour Gloves
 				Iron Gauntlets
 				Quality: 0
@@ -523,7 +761,7 @@ describe("TestItemParse", function()
 	end)
 
 	it("magic item", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 				Rarity: MAGIC
 				Name Prefix Iron Gauntlets -> +50 ignite chance
 				+50% chance to Ignite
@@ -537,13 +775,13 @@ describe("TestItemParse", function()
 	end)
 
 	it("Energy Blade", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Item Class: One Hand Swords
 			Rarity: Magic
 			Superior Energy Blade
 		]])
 		assert.are.equal("Energy Blade One Handed", item.baseName)
-		item = new("Item", [[
+		item = new("Item"):Item([[
 			Item Class: Two Hand Swords
 			Rarity: Magic
 			Superior Energy Blade
@@ -552,7 +790,7 @@ describe("TestItemParse", function()
 	end)
 
 	it("Flask buff", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Magic
 			Chemist's Granite Flask of the Opossum
 		]])
@@ -575,14 +813,14 @@ describe("TestAdvancedItemParse #item", function()
 	end
 
 	it("parses to craft", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Prefix Modifier "Fecund" (Tier: 1) — Life }
 			+142(130-144) to maximum Life
 		]], "Cord Belt"))
 		assert.are.equals("IncreasedLife9", item.prefixes[1].modId)
 		assert.are.equals(0.857, item.prefixes[1].range)
 		assert.are.equals("life", item.explicitModLines[1].modTags[1])
-		item = new("Item", raw([[
+		item = new("Item"):Item(raw([[
 			{ Master Crafted Suffix Modifier "of Craft" (Rank: 3) — Elemental, Cold, Resistance }
 			+35(29-35)% to Cold Resistance
 		]], "Cord Belt"))
@@ -590,7 +828,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses correct range", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Prefix Modifier "Freezing" (Tier: 5) — Damage, Elemental, Cold, Caster  — 8% Increased }
 			Adds 17(16-20) to 35(30-36) Cold Damage to Spells
 		]], "Void Sceptre"))
@@ -599,7 +837,7 @@ describe("TestAdvancedItemParse #item", function()
 
 	-- GGG scales each mod line separately here, but PoB scales them both together, so this parsing is a bit wonky
 	it("parses multi-line mod", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Prefix Modifier "Warlock's" (Tier: 4) — Mana, Damage, Caster }
 			32(30-37)% increased Spell Damage
 			+46(42-47) to maximum Mana
@@ -610,7 +848,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("resets linePrefix", function() 
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Prefix Modifier "Warlock's" (Tier: 4) — Mana, Damage, Caster }
 			32(30-37)% increased Spell Damage
 			+46(42-47) to maximum Mana
@@ -621,7 +859,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("resets linePostfix", function() 
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Corruption Enhancement — Mana }
 			24(20-30)% increased Mana Regeneration Rate
 			--------
@@ -631,7 +869,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses vaaled catalyst", function() 
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Quality (Attribute Modifiers): +19% (augmented)
 			{ Unique Modifier — Attribute  — 19% Increased }
 			+120(80-100) to all Attributes
@@ -644,7 +882,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses vaaled catalyst within range", function() 
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Quality (Attribute Modifiers): +19% (augmented)
 			{ Unique Modifier — Attribute  — 19% Increased }
 			+95(80-100) to all Attributes
@@ -657,7 +895,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("doesn't scale unscalable", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Quality (Life and Mana Modifiers): +20% (augmented)
 			{ Unique Modifier — Life, Defences, Energy Shield, Minion, Gem }
 			Socketed Golem Skills gain 20% of Maximum Life as Extra Maximum Energy Shield — Unscalable Value
@@ -666,7 +904,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("correctly matches conqueror mod", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Suffix Modifier "of the Conquest" (Tier: 1) — Elemental, Cold }
 			10(8-10)% chance to Avoid Cold Damage from Hits
 			(No chance to avoid damage can be higher than 75%)
@@ -677,7 +915,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses enchant correctly #enchant", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Corrupted Enhancement }
 			+8(6-10)% to Fire Resistance
 		]]))
@@ -685,7 +923,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses enchant with tags correctly #enchant", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Corrupted Enhancement - Energy Shield }
 			+8(6-10)% to Fire Resistance
 		]]))
@@ -694,7 +932,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses junk", function()
-		local godTestItem = new("Item", [[
+		local godTestItem = new("Item"):Item([[
 			Item Class: Sceptres
 			Rarity: Unique
 			Nebulis
@@ -712,7 +950,7 @@ describe("TestAdvancedItemParse #item", function()
 			Str: 104
 			Int: 122
 			--------
-			Sockets: B R 
+			Sockets: B R
 			--------
 			Item Level: 87
 			--------
@@ -763,7 +1001,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses allocated Crucible passive skills from advanced copy", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			{ Allocated Crucible Passive Skill (Tier: 1) }
 			-3% to Critical Strike Chance
 			+100% to Global Critical Strike Multiplier
@@ -782,7 +1020,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("ignores attribute requirements from socketed gems", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Requirements:
 			Str: 126 (unmet)
 			Dex: 185 (unmet)
@@ -801,7 +1039,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("orders fractured mods first and crafted mods last", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Item Level: 83
 			{ Fractured Prefix Modifier "Cheetah's" (Tier: 2) — Speed }
 			30% increased Movement Speed
@@ -826,7 +1064,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("matches same-name affixes using their advanced-copy ranges", function()
-		local item = new("Item", raw([[
+		local item = new("Item"):Item(raw([[
 			Item Level: 85
 			{ Fractured Prefix Modifier "Essences" — Damage, Elemental, Fire, Attack }
 			Adds 100(80-109) to 179(162-189) Fire Damage
@@ -844,7 +1082,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("filters flask base properties and parses fixed-value advanced rolls", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Unique
 			Soul Catcher
 			Quartz Flask
@@ -870,7 +1108,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("preserves rolls from large advanced-copy ranges", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Unique
 			Elegant Hubris
 			Timeless Jewel
@@ -886,8 +1124,28 @@ describe("TestAdvancedItemParse #item", function()
 		assert.are.equals("Commissioned 150720 coins to commemorate Chitus", seedLine)
 	end)
 
+	it("keeps the roll written in a saved value(min-max) line over its ModRange", function()
+		loadBuildFromXML([[
+<PathOfBuilding>
+	<Build level="1" targetVersion="3_0" className="Scion" ascendClassName="None" mainSocketGroup="1"/>
+	<Items activeItemSet="1">
+		<Item id="1">
+Rarity: UNIQUE
+Crown of the Inward Eye
+Prophet Crown
+Implicits: 0
+{range:0.5}14(9-21)% increased maximum Life, Mana and Global Energy Shield
+			<ModRange id="1" range="0.5"/>
+		</Item>
+		<ItemSet id="1"/>
+	</Items>
+</PathOfBuilding>]])
+
+		assert.are.equals(0.416667, build.itemsTab.items[1].explicitModLines[1].range)
+	end)
+
 	it("preserves independently rolled values on the same modifier line", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Unique
 			Prismweave
 			Rustic Sash
@@ -902,7 +1160,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("orders advanced-copy unique modifiers by their database stat order", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Unique
 			Geofri's Sanctuary
 			Elegant Ringmail
@@ -930,8 +1188,34 @@ describe("TestAdvancedItemParse #item", function()
 		}, lines(item.explicitModLines))
 	end)
 
+	it("keeps saved rolls on their lines for a unique saved out of stat order", function()
+		loadBuildFromXML([[
+<PathOfBuilding>
+	<Build level="1" targetVersion="3_0" className="Scion" ascendClassName="None" mainSocketGroup="1"/>
+	<Items activeItemSet="1">
+		<Item id="1">
+Rarity: UNIQUE
+Geofri's Sanctuary
+Elegant Ringmail
+Implicits: 0
+{range:0.2}+(60-70) to maximum Life
+{range:0.9}(50-75)% increased Armour and Energy Shield
+			<ModRange id="1" range="0.2"/>
+			<ModRange id="2" range="0.9"/>
+		</Item>
+		<ItemSet id="1"/>
+	</Items>
+</PathOfBuilding>]])
+
+		local ranges = { }
+		for _, modLine in ipairs(build.itemsTab.items[1].explicitModLines) do
+			ranges[modLine.line] = modLine.range
+		end
+		assert.are.equals(0.9, ranges["(50-75)% increased Armour and Energy Shield"])
+	end)
+
 	it("keeps the selected value from advanced-copy enum ranges", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Unique
 			The Dark Monarch
 			Lich's Circlet
@@ -946,7 +1230,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses punctuated enum and descending numeric ranges", function()
-		local gemItem = new("Item", [[
+		local gemItem = new("Item"):Item([[
 			Rarity: Unique
 			Replica Dragonfang's Flight
 			Onyx Amulet
@@ -956,7 +1240,7 @@ describe("TestAdvancedItemParse #item", function()
 		assert.are.equals("+3 to Level of all Lightning Tendrils Gems", gemItem.explicitModLines[1].line)
 		assert.is_true(#gemItem.explicitModLines[1].modList > 0)
 
-		local requirementItem = new("Item", [[
+		local requirementItem = new("Item"):Item([[
 			Rarity: Unique
 			Replica Dragonfang's Flight
 			Onyx Amulet
@@ -969,7 +1253,7 @@ describe("TestAdvancedItemParse #item", function()
 	end)
 
 	it("parses Memory Strands as an item property", function()
-		local item = new("Item", [[
+		local item = new("Item"):Item([[
 			Rarity: Magic
 			Imperial Maul of Revitalization
 			Weapon Range: 1.3 metres
@@ -987,6 +1271,28 @@ describe("TestAdvancedItemParse #item", function()
 		item:BuildAndParseRaw()
 		assert.are.equals(70, item.memoryStrands)
 		assert.are.equals(1, #item.explicitModLines)
+	end)
+
+	it("keeps saved rolls when a property was saved among the modifier lines", function()
+		loadBuildFromXML([[
+<PathOfBuilding>
+	<Build level="1" targetVersion="3_0" className="Scion" ascendClassName="None" mainSocketGroup="1"/>
+	<Items activeItemSet="1">
+		<Item id="1">
+Rarity: RARE
+Pain Shell
+Vaal Regalia
+Implicits: 0
+Intangibility: 7%
+{range:0}+(10-13) to all Attributes
+			<ModRange id="1" range="0.5"/>
+			<ModRange id="2" range="0"/>
+		</Item>
+		<ItemSet id="1"/>
+	</Items>
+</PathOfBuilding>]])
+
+		assert.are.equals(0, build.itemsTab.items[1].explicitModLines[1].range)
 	end)
 
 	it("preserves cluster jewel enchants from advanced copy", function()
@@ -1110,7 +1416,7 @@ describe("TestAdvancedItemParse #item", function()
 		end)
 
 		it("does not apply disabled modifier magnitude", function()
-			local item = new("Item", [[
+			local item = new("Item"):Item([[
 			Rarity: UNIQUE
 			Magnitude Test
 			Plate Vest
@@ -1342,7 +1648,7 @@ describe("TestAdvancedItemParse #item", function()
 		]]
 		it("scales only prefixes for increased effect of prefixes for advanced copy format", function()
 			assert.equal(0, spellCrit())
-			local item = new("Item", realJewel)
+			local item = new("Item"):Item(realJewel)
 			build.itemsTab:AddItem(item)
 			build.itemsTab:EquipItemInSet(item, build.itemsTab.activeItemSetId)
 			runCallback("OnFrame")
@@ -1351,12 +1657,51 @@ describe("TestAdvancedItemParse #item", function()
 		end)
 
 		it("does not apply scaling twice when saving and loading", function()
-			local item = new("Item", new("Item", realJewel):BuildRaw())
+			local item = new("Item"):Item(new("Item"):Item(realJewel):BuildRaw())
 			build.itemsTab:AddItem(item)
 			build.itemsTab:EquipItemInSet(item, build.itemsTab.activeItemSetId)
 			runCallback("OnFrame")
 			assert.equal(27, spellCrit())
 			assert.equal(8, spellDamage())
+		end)
+		it("does not scale modifiers that grant skills", function()
+			local item = new("Item"):Item([[
+				Item Class: Rings
+				Rarity: Rare
+				Plague Knuckle
+				Helical Ring
+				--------
+				Item Level: 84
+				--------
+				{ Implicit Modifier }
+				50% increased Suffix Modifier magnitudes
+				--------
+				{ Suffix Modifier "of !!UNPARSEABLE!!"  — 50% Increased }
+				Grants Level 20 Aspect of !!UNPARSEABLE!! Skill
+				{ Suffix Modifier "of the Spider"  — 50% Increased }
+				Grants Level 20 Aspect of the Spider Skill
+				--------
+			]])
+			assert.truthy(item.base)
+			local found = 0
+			local foundExtraSkill = false
+			for _, modLine in ipairs(item.explicitModLines) do
+				if modLine.line:find("Grants Level", 1, true) then
+					found = found + 1
+					assert.matches("Level 20", itemLib.formatModLine(modLine))
+					for _, mod in ipairs(modLine.modList) do
+						if mod.name == "ExtraSkill" then
+							foundExtraSkill = true
+							assert.equals(20, mod.value.level)
+						end
+					end
+					if modLine.line:find("UNPARSEABLE", 1, true) then
+						assert.truthy(modLine.extra)
+					end
+				end
+			end
+			assert.equals(2, found)
+			assert.is_true(foundExtraSkill)
 		end)
 	end)
 end)
