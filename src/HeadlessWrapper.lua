@@ -33,29 +33,37 @@ end
 
 
 -- ===== api-stdio fork additions (charleslucas/PathOfBuilding) =====
--- Real Inflate via LuaJIT FFI + bundled zlib1.dll (upstream def stub returns "")
-function Inflate(data)
-	if not data or data == "" then return nil end
-	local ok, ffi = pcall(require, 'ffi')
-	if ok and ffi then
-		local ok2, zlib = pcall(ffi.load, 'zlib1')
-		if ok2 and zlib then
-			pcall(function()
-				ffi.cdef[[
-					int uncompress(unsigned char *dest, unsigned long *destLen,
-					               const unsigned char *source, unsigned long sourceLen);
-				]]
-			end)
-			local outLen = ffi.new('unsigned long[1]', #data * 20 + 65536)
-			local out = ffi.new('unsigned char[?]', outLen[0])
-			local src = ffi.cast('const unsigned char*', data)
-			local ret = pcall(function() return zlib.uncompress(out, outLen, src, #data) end)
-			if ret then
-				return ffi.string(out, outLen[0])
-			end
-		end
-	end
-	return nil
+-- Real Inflate via LuaJIT FFI + zlib (upstream def stub returns "", which makes
+-- PoB's timeless-jewel loader cache an empty table and skip conquered nodes).
+-- The return code MUST be checked: on Z_BUF_ERROR the output is truncated, and
+-- handing PoB a truncated/garbage table crashed LuaJIT natively (access
+-- violation) on timeless-jewel builds. Grow and retry, as upstream pob-mcp does.
+do
+  local okFfi, ffi = pcall(require, 'ffi')
+  local zlib
+  if okFfi and ffi then
+    pcall(ffi.cdef, [[
+      int uncompress(uint8_t *dest, unsigned long *destLen, const uint8_t *source, unsigned long sourceLen);
+    ]])
+    -- PoB 2.68+ ships runtime/z.dll; older releases zlib1.dll.
+    for _, name in ipairs({ 'z', 'zlib1', 'libz.so.1', 'libz.dylib' }) do
+      local loaded, lib = pcall(ffi.load, name)
+      if loaded then zlib = lib break end
+    end
+  end
+  function Inflate(data)
+    if not data or #data == 0 or not zlib then return '' end
+    local size = math.max(#data * 4, 65536)
+    while size <= 1024 * 1024 * 1024 do
+      local buf = ffi.new('uint8_t[?]', size)
+      local len = ffi.new('unsigned long[1]', size)
+      local rc = zlib.uncompress(buf, len, data, #data)
+      if rc == 0 then return ffi.string(buf, len[0]) end
+      if rc ~= -5 then return '' end  -- anything but Z_BUF_ERROR is fatal
+      size = size * 2
+    end
+    return ''
+  end
 end
 function GetScriptPath()
 	return rawget(_G, 'POB_SCRIPT_DIR') or ""

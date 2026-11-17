@@ -194,13 +194,76 @@ handlers.version = function(params)
   return { ok = true, version = version_meta() }
 end
 
+-- Headless (stdio) build loading, hardened (ported from upstream pob-mcp #52).
+-- These handlers only run headless: in TCP mode the PoB window owns the build.
+-- Set when the last load_build_xml failed: build-reading actions then refuse
+-- instead of answering with whatever build happens to be in memory.
+local lastLoadError = nil
+local HEADLESS = type(rawget(_G, 'loadBuildFromXML')) == 'function'
+-- Headless runs in dev mode, which autosaves the outgoing build on every switch
+-- and opens an error popup when that fails; loads treat popups as failures.
+-- (Never set in the GUI: it would be persisted to the user's settings.)
+if HEADLESS and _G.launch and _G.launch.main then _G.launch.main.disableDevAutoSave = true end
+
+local function closePopups()
+  local main = _G.launch and _G.launch.main
+  local titles = {}
+  if main and main.popups then
+    for i, popup in ipairs(main.popups) do titles[i] = tostring(popup.title) end
+    while #main.popups > 0 do main:ClosePopup() end
+  end
+  return titles
+end
+
+-- Load a build without inheriting anything from the outgoing one, and fail loudly
+-- instead of leaving the previous build's output in place. Returns true when PoB
+-- had to convert the build to the current game version.
+local function loadFresh(xml, name)
+  if _G.launch then _G.launch.promptMsg = nil end
+  closePopups()
+  -- PoB reuses the build object across loads; cluster-jewel subGraphs from the
+  -- outgoing build point at replaced sockets and PostLoad asserts on them.
+  if build and build.spec then build.spec.subGraphs = {} end
+  -- Loading straight over another build can read its tabs (e.g. a stale
+  -- activeSpec index); passing through an empty build resets them.
+  _G.newBuild()
+  -- A blank build still calculates, so restore shared data after it.
+  restoreSharedData()
+  local stale = build and build.calcsTab and build.calcsTab.mainOutput
+  _G.loadBuildFromXML(xml, name)
+  local prompt = _G.launch and _G.launch.promptMsg
+  if _G.launch then _G.launch.promptMsg = nil end
+  if prompt then error('PoB prompt: ' .. tostring(prompt), 0) end
+  -- A build without a supported targetVersion opens the "Game Version" popup; do
+  -- what its default button does in the GUI: convert, which reloads the build.
+  local converted = false
+  local main = _G.launch and _G.launch.main
+  local popup = main and main.popups and main.popups[1]
+  if popup and #main.popups == 1 and popup.title == 'Game Version'
+      and popup.controls and popup.controls.convert and popup.controls.convert.onClick then
+    popup.controls.convert.onClick()
+    converted = true
+  end
+  local popups = closePopups()
+  if #popups > 0 then error('PoB opened a popup: ' .. table.concat(popups, ' | '), 0) end
+  -- PoB can close the build without throwing; Shutdown clears savers.
+  if not build or not build.savers or not build.spec then
+    error('PoB did not initialize the build; check the XML and supported build version', 0)
+  end
+  local output = build.calcsTab and build.calcsTab.mainOutput
+  if not output or output == stale then error('build did not produce a fresh calculation', 0) end
+  return converted
+end
+
 handlers.new_build = function(params)
   if not _G.newBuild then
     return { ok = false, error = 'headless wrapper not initialized' }
   end
+  if build and build.spec then build.spec.subGraphs = {} end
   _G.newBuild()
   -- A blank build still calculates, so restore after it, not before.
   restoreSharedData()
+  lastLoadError = nil
   return { ok = true }
 end
 
@@ -212,9 +275,13 @@ handlers.load_build_xml = function(params)
   if not _G.loadBuildFromXML then
     return { ok = false, error = 'headless wrapper not initialized' }
   end
-  restoreSharedData()
-  _G.loadBuildFromXML(params.xml, name)
-  return { ok = true, build_id = 1 }
+  local ok, res = pcall(loadFresh, params.xml, name)
+  if not ok then
+    lastLoadError = tostring(res)
+    return { ok = false, error = lastLoadError }
+  end
+  lastLoadError = nil
+  return { ok = true, build_id = 1, converted = res == true or nil }
 end
 
 handlers.get_stats = function(params)
@@ -742,6 +809,24 @@ handlers.import_items_skills = function(params)
     level     = (type(ret) == 'table' and ret.level) or (type(charData) == 'table' and charData.level) or nil,
     character = (type(ret) == 'table' and ret) or charData,
   }
+end
+
+-- After a failed headless load, build-reading actions refuse until the next good
+-- load or new_build (they would otherwise answer from the previous build).
+local LOAD_INDEPENDENT = {
+  ping = true, version = true, new_build = true, load_build_xml = true, quit = true,
+}
+if HEADLESS then
+  for action, fn in pairs(handlers) do
+    if not LOAD_INDEPENDENT[action] then
+      handlers[action] = function(...)
+        if lastLoadError then
+          return { ok = false, error = 'last build load failed (' .. lastLoadError .. '); load a build or call new_build first' }
+        end
+        return fn(...)
+      end
+    end
+  end
 end
 
 return {
