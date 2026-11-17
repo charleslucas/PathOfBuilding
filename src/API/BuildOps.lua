@@ -70,6 +70,82 @@ function M.export_stats(fields)
 end
 
 -- Read current tree allocation and metadata
+local MAX_PARSE_MOD_LINES = 200
+
+local function modLineTexts(modLines, into)
+  into = into or {}
+  for _, line in ipairs(modLines or {}) do
+    if #into >= MAX_PARSE_MOD_LINES then break end
+    if type(line) == 'table' and type(line.line) == 'string' then
+      table.insert(into, line.line)
+    end
+  end
+  return into
+end
+
+-- (Ported from upstream pob-mcp #55.) Dry-run an item through PoB's own parser without touching the build: the item
+-- is constructed and its mods built, but never added to itemsTab, so the loaded
+-- build, its item list and its undo history are exactly as they were.
+function M.parse_item(params)
+  if type(params) ~= 'table' or type(params.text) ~= 'string' then
+    return nil, 'missing item text'
+  end
+  if #params.text == 0 then return nil, 'item text cannot be empty' end
+  if #params.text > MAX_ITEM_TEXT_LENGTH then
+    return nil, string.format('item text too long (max %d bytes)', MAX_ITEM_TEXT_LENGTH)
+  end
+
+  local ok, item = pcall(construct, 'Item', params.text)
+  if not ok then return nil, 'invalid item text: ' .. tostring(item) end
+  if not item or not item.baseName then
+    return nil, 'failed to parse item: no recognised base type'
+  end
+
+  local built, buildErr = pcall(function()
+    item:NormaliseQuality()
+    item:BuildModList()
+  end)
+  if not built then return nil, 'item mods could not be built: ' .. tostring(buildErr) end
+
+  local crafted, fractured, explicits = {}, {}, {}
+  local unparsed = {}
+  for _, line in ipairs(item.explicitModLines or {}) do
+    if type(line) == 'table' and type(line.line) == 'string' and #explicits + #crafted + #fractured < MAX_PARSE_MOD_LINES then
+      if line.crafted then table.insert(crafted, line.line)
+      elseif line.fractured then table.insert(fractured, line.line)
+      else table.insert(explicits, line.line) end
+    end
+  end
+  -- PoB keeps a line it could not turn into a modifier (typo, wrong wording,
+  -- unsupported mod) with `extra` set. Such a line is calculated as nothing.
+  for _, group in ipairs({ item.enchantModLines or {}, item.implicitModLines or {}, item.explicitModLines or {} }) do
+    for _, line in ipairs(group) do
+      if type(line) == 'table' and line.extra ~= nil and type(line.line) == 'string' and #unparsed < MAX_PARSE_MOD_LINES then
+        table.insert(unparsed, line.line)
+      end
+    end
+  end
+
+  local req = type(item.requirements) == 'table' and item.requirements or {}
+  return {
+    name = item.name,
+    base = item.baseName,
+    rarity = item.rarity,
+    type = item.type,
+    itemLevel = item.itemLevel,
+    quality = item.quality,
+    corrupted = item.corrupted == true,
+    identified = item.identified ~= false,
+    implicits = modLineTexts(item.implicitModLines),
+    explicits = explicits,
+    crafted = crafted,
+    fractured = fractured,
+    enchants = modLineTexts(item.enchantModLines),
+    unparsed = unparsed,
+    requirements = { level = req.level, str = req.str, dex = req.dex, int = req.int },
+  }
+end
+
 function M.get_tree()
   if not build or not build.spec then
     return nil, "build/spec not initialized"
@@ -483,8 +559,70 @@ end
 
 -- Calculate what-if scenario without persisting changes
 -- params: { addNodes?: number[], removeNodes?: number[], masteryEffects?: {[id]=effectId}, useFullDPS?: boolean }
+-- Item lines PoB could not turn into modifiers. A line it does not understand
+-- contributes nothing, so a substituted item carrying one calculates to a zero
+-- delta that looks exactly like a mod that simply does not matter. PoB marks such
+-- lines (and the unparsed remainder of partly understood ones) with modLine.extra.
+-- (Ported from upstream pob-mcp #61.)
+local UNPARSED_LINE_LISTS = {
+  'enchantModLines', 'scourgeModLines', 'implicitModLines', 'explicitModLines', 'crucibleModLines',
+}
+function M.unrecognised_item_lines(item)
+  local found = {}
+  for _, listName in ipairs(UNPARSED_LINE_LISTS) do
+    for _, modLine in ipairs(item[listName] or {}) do
+      if type(modLine) == 'table' and modLine.extra then
+        local text = tostring(modLine.line or modLine.extra):gsub('{[^}]*}', '')
+        table.insert(found, text)
+      end
+    end
+  end
+  return found
+end
+
+-- params: { addNodes?, removeNodes?, masteryEffects?: {[nodeId]=effectId},
+--           repItem?: string (item text), repSlotName?: string (itemsTab slot name),
+--           toggleFlask?: number (1-NUM_FLASK_SLOTS) }
+-- Returns out, baseOut, unrecognisedLines (repItem lines PoB could not parse, or nil).
 function M.calc_with(params)
   if not build or not build.calcsTab then return nil, 'build not initialized' end
+
+  -- Item substitution / flask toggle (ported from upstream pob-mcp #36). Validated
+  -- before anything is patched so an error return leaves the build untouched.
+  local repItem, repSlotName, toggleFlask, unrecognised = nil, nil, nil, nil
+  if params and (params.repItem ~= nil or params.repSlotName ~= nil) then
+    if type(params.repItem) ~= 'string' or type(params.repSlotName) ~= 'string' then
+      return nil, 'repItem (item text) and repSlotName must be given together'
+    end
+    if #params.repItem == 0 then return nil, 'repItem text cannot be empty' end
+    if #params.repItem > MAX_ITEM_TEXT_LENGTH then
+      return nil, string.format('repItem text too long (max %d bytes)', MAX_ITEM_TEXT_LENGTH)
+    end
+    -- CalcSetup matches repSlotName against itemsTab slot names, not base types; a
+    -- name it never matches ("Ring", "Chest") would silently return the unchanged build.
+    if not (build.itemsTab and build.itemsTab.slots and build.itemsTab.slots[params.repSlotName]) then
+      return nil, 'unknown slot: ' .. params.repSlotName
+    end
+    local parsed, item = pcall(construct, 'Item', params.repItem)
+    if not parsed then return nil, 'invalid item text: ' .. tostring(item) end
+    if not item or not item.baseName then return nil, 'failed to parse item' end
+    item:NormaliseQuality()
+    item:BuildModList()  -- quality moves the item's mods; rebuild as ItemsTab does
+    repItem, repSlotName = item, params.repSlotName
+    unrecognised = M.unrecognised_item_lines(item)
+  end
+  if params and params.toggleFlask ~= nil then
+    local idx = tonumber(params.toggleFlask)
+    if not idx or idx < 1 or idx > NUM_FLASK_SLOTS then
+      return nil, string.format('invalid flask index (must be 1-%d)', NUM_FLASK_SLOTS)
+    end
+    local slot = build.itemsTab and build.itemsTab.slots and build.itemsTab.slots['Flask ' .. tostring(idx)]
+    -- The override toggles membership of env.flasks; an item not in the slot would
+    -- switch on a flask the character does not carry.
+    local flask = slot and slot.selItemId and build.itemsTab.items[slot.selItemId]
+    if not flask then return nil, 'no flask equipped in Flask ' .. tostring(idx) end
+    toggleFlask = flask
+  end
 
   -- Collect nodes to temporarily add/remove (only unallocated add / allocated remove)
   local toAdd, toRemove = {}, {}
@@ -535,7 +673,7 @@ function M.calc_with(params)
   local calcFunc, baseOut = build.calcsTab:GetMiscCalculator()
 
   -- Nothing to simulate: return the base calc directly
-  if #toAdd == 0 and #toRemove == 0 and next(savedState) == nil then
+  if #toAdd == 0 and #toRemove == 0 and next(savedState) == nil and not repItem and not toggleFlask then
     return baseOut, baseOut
   end
 
@@ -548,6 +686,8 @@ function M.calc_with(params)
     override.removeNodes = {}
     for _, n in ipairs(toRemove) do override.removeNodes[n] = true end
   end
+  if repItem then override.repSlotName, override.repItem = repSlotName, repItem end
+  if toggleFlask then override.toggleFlask = toggleFlask end
 
   -- Bypass calcFullDPS which runs unconditionally when viewMode=="TREE",
   -- making each call 30+ seconds. calcs.perform correctly sets CombinedDPS.
@@ -557,7 +697,7 @@ function M.calc_with(params)
   build.viewMode = savedViewMode
   restoreMasteries()
   if not ok then return nil, 'calc_with failed: ' .. tostring(out) end
-  return out, baseOut
+  return out, baseOut, unrecognised
 end
 
 

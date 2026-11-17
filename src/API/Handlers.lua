@@ -348,23 +348,48 @@ handlers.update_tree_delta = function(params)
   }
 end
 
-handlers.calc_with = function(params)
-  local out, base = BuildOps.calc_with(params or {})
-  if not out then return { ok = false, error = base } end
-  -- Slim down to JSON-safe scalar fields only (full output has functions/userdata)
-  local slim = {
-    CombinedDPS   = out.CombinedDPS,
-    TotalDPS      = out.TotalDPS,
-    AverageDamage = out.AverageDamage,
-    Life          = out.Life,
-    TotalEHP      = out.TotalEHP,
-    EnergyShield  = out.EnergyShield,
-  }
+-- Default calc_with fields; callers may request more scalar output keys via
+-- params.fields (e.g. MissingFireResist for resistance headroom).
+local CALC_WITH_FIELDS = { 'CombinedDPS', 'TotalDPS', 'AverageDamage', 'Life', 'TotalEHP', 'EnergyShield' }
+local function slimCalcOutput(out, extraFields)
+  if type(out) ~= 'table' then return nil end
+  -- JSON-safe scalars only (the full output has functions/userdata)
+  local slim = {}
+  local function put(k)
+    local v = out[k]
+    if type(v) == 'number' then
+      if v == v and v ~= math.huge and v ~= -math.huge then slim[k] = v end
+    elseif type(v) == 'boolean' or type(v) == 'string' then
+      slim[k] = v
+    end
+  end
+  for _, k in ipairs(CALC_WITH_FIELDS) do put(k) end
+  if type(extraFields) == 'table' then
+    for _, k in ipairs(extraFields) do if type(k) == 'string' then put(k) end end
+  end
   local minion = type(out.Minion) == 'table' and out.Minion or nil
   if minion then
     slim.Minion = { CombinedDPS = minion.CombinedDPS, TotalDPS = minion.TotalDPS }
   end
-  return { ok = true, output = slim }
+  return slim
+end
+
+handlers.parse_item = function(params)
+  local res, err = BuildOps.parse_item(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, item = res }
+end
+
+handlers.calc_with = function(params)
+  params = params or {}
+  local out, base, unrecognised = BuildOps.calc_with(params)
+  if not out then return { ok = false, error = base } end
+  return {
+    ok = true,
+    output = slimCalcOutput(out, params.fields),
+    base = slimCalcOutput(base, params.fields),
+    unrecognisedLines = (unrecognised and #unrecognised > 0) and unrecognised or nil,
+  }
 end
 
 handlers.get_config = function(params)
