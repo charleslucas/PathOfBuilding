@@ -82,6 +82,23 @@ pob-mcp calls these actions via the `PoBLuaTcpClient` / `PoBLuaApiClient` bridge
 
 ---
 
+## Skill Sets, Config Sets & Loadouts
+
+| Action | Description | Key params |
+|--------|-------------|-----------|
+| `list_skill_sets` | List skill sets (gem sets) with group counts | — |
+| `select_skill_set` | Switch the active skill set and rebuild | `id` |
+| `list_config_sets` | List config sets | — |
+| `select_config_set` | Switch the active config set and rebuild | `id` |
+| `list_loadouts` | List loadouts derived from sets sharing a title (PoB does not store loadouts; matched per family, `complete` flag) | — |
+| `select_loadout` | Switch tree spec + item set + skill set + config set of one loadout | `name` or `index` |
+
+Loadouts mirror `buildMode:SyncLoadouts()` (`Modules/Build.lua`): a family with a
+single set acts as a wildcard, plain titles match case-insensitively, and
+`{grp}` link identifiers match by shared id.
+
+---
+
 ## Skills & Gems
 
 | Action | Description | Key params |

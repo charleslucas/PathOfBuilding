@@ -626,6 +626,44 @@ handlers.create_item_set = function(params)
   return { ok = true, result = res }
 end
 
+handlers.list_skill_sets = function(params)
+  local res, err = BuildOps.list_skill_sets()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.select_skill_set = function(params)
+  if not params or params.id == nil then return { ok = false, error = 'missing id' } end
+  local res, err = BuildOps.select_skill_set(tonumber(params.id))
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.list_config_sets = function(params)
+  local res, err = BuildOps.list_config_sets()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.select_config_set = function(params)
+  if not params or params.id == nil then return { ok = false, error = 'missing id' } end
+  local res, err = BuildOps.select_config_set(tonumber(params.id))
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.list_loadouts = function(params)
+  local res, err = BuildOps.list_loadouts()
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.select_loadout = function(params)
+  local res, err = BuildOps.select_loadout(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.get_mastery_options = function(params)
   local res, err = BuildOps.get_mastery_options()
   if not res then return { ok = false, error = err } end
