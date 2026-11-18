@@ -1107,7 +1107,7 @@ function M.add_item_text(params)
   end
 
   -- Use pcall to safely handle item creation
-  local ok, item = pcall(new, 'Item', params.text)
+  local ok, item = pcall(construct, 'Item', params.text)
   if not ok then return nil, 'invalid item text: ' .. tostring(item) end
   if not item or not item.baseName then return nil, 'failed to parse item' end
 
