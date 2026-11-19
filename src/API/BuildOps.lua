@@ -12,6 +12,12 @@ local function construct(className, ...)
   return object[className](object, ...)
 end
 
+-- PoB titles may carry colour codes (^4, ^xRRGGBB); strip them for display and for
+-- matching user input. Set-to-set matching keeps the raw title, as PoB does.
+local function strip_colors(s)
+  return (s:gsub('%^x%x%x%x%x%x%x', ''):gsub('%^%d', ''))
+end
+
 -- Constants
 local MIN_PLAYER_LEVEL = 1
 local MAX_PLAYER_LEVEL = 100
@@ -1919,7 +1925,7 @@ end
 local function spec_info(spec, index, activeIndex)
   return {
     index = index,
-    title = spec.title or ('Spec ' .. tostring(index)),
+    title = strip_colors(spec.title or ('Spec ' .. tostring(index))),
     className = spec.curClassName or 'Unknown',
     ascendClassName = spec.curAscendClassName or 'None',
     nodeCount = spec.allocNodes and (function() local n=0; for _ in pairs(spec.allocNodes) do n=n+1 end; return n end)() or 0,
@@ -1949,8 +1955,14 @@ function M.select_spec(index)
   local tt = build.treeTab
   local specs = tt.specList or {}
   if not specs[index] then return nil, 'spec index out of range: ' .. tostring(index) end
-  tt.activeSpec = index
-  build.spec = specs[index]
+  -- SetActiveSpec also re-sockets each spec's own jewels and refreshes item slots;
+  -- assigning activeSpec/build.spec alone kept the previous spec's jewels.
+  local ok = tt.SetActiveSpec and pcall(tt.SetActiveSpec, tt, index)
+  if not ok then
+    tt.activeSpec = index
+    build.spec = specs[index]
+  end
+  build.buildFlag = true
   M.get_main_output()
   return get_spec_list()
 end
@@ -2019,7 +2031,7 @@ end
 local function itemset_info(set, id, activeId)
   return {
     id = id,
-    title = set.title or ('Item Set ' .. tostring(id)),
+    title = strip_colors(set.title or ('Item Set ' .. tostring(id))),
     useSecondWeaponSet = set.useSecondWeaponSet == true,
     active = (id == activeId),
   }
@@ -2138,7 +2150,7 @@ end
 local function skillset_info(set, id, activeId)
   return {
     id = id,
-    title = set.title or ('Skill Set ' .. tostring(id)),
+    title = strip_colors(set.title or ('Skill Set ' .. tostring(id))),
     socketGroupCount = set.socketGroupList and #set.socketGroupList or 0,
     active = (id == activeId),
   }
@@ -2190,7 +2202,7 @@ end
 local function configset_info(set, id, activeId)
   return {
     id = id,
-    title = set.title or 'Default',
+    title = strip_colors(set.title or 'Default'),
     customModCount = set.customModsList and #set.customModsList or 0,
     active = (id == activeId),
   }
@@ -2287,7 +2299,7 @@ end
 
 local function entry_report(entry, activeId)
   if not entry then return nil end
-  return { id = entry.id, title = entry.title, base = entry.base, active = (entry.id == activeId) }
+  return { id = entry.id, title = strip_colors(entry.title), base = entry.base, active = (entry.id == activeId) }
 end
 
 -- Match one family to a loadout name/link. With a single set in the family PoB
@@ -2296,7 +2308,6 @@ end
 local function match_family(entries, activeId, refBase, refLinkIds)
   if #entries == 0 then return nil end
   local hasLinks = next(refLinkIds) ~= nil
-  local refLower = refBase:lower()
   for _, entry in ipairs(entries) do
     if #entries == 1 then
       return entry_report(entry, activeId)
@@ -2306,13 +2317,27 @@ local function match_family(entries, activeId, refBase, refLinkIds)
           return entry_report(entry, activeId)
         end
       end
-    elseif not next(entry.linkIds) and entry.base:lower() == refLower then
+    elseif not next(entry.linkIds) and entry.base == refBase then
       return entry_report(entry, activeId)
     end
   end
   return nil
 end
 
+local FAMILY_LABELS = { 'tree spec', 'item set', 'skill set', 'config set' }
+
+local function missing_families(row)
+  local missing = {}
+  local reports = { row.treeSpec, row.itemSet, row.skillSet, row.configSet }
+  for i, label in ipairs(FAMILY_LABELS) do
+    if not reports[i] then table.insert(missing, label) end
+  end
+  return missing
+end
+
+-- One row per loadout PoB's dropdown would offer, plus incomplete ones (flagged).
+-- A tree spec titled "Name {1,2}" yields one row per link id ("Name {1}", "Name {2}"),
+-- as SyncLoadouts does; each row's title is what select_loadout matches first.
 local function build_loadout_list()
   if not build or not build.treeTab or not build.itemsTab or not build.skillsTab or not build.configTab then
     return nil, 'build not initialized'
@@ -2321,27 +2346,34 @@ local function build_loadout_list()
   local itemEntries, itemActive = family_entries(it.itemSets, it.itemSetOrderList, it.activeItemSetId)
   local skillEntries, skillActive = family_entries(st.skillSets, st.skillSetOrderList, st.activeSkillSetId)
   local configEntries, configActive = family_entries(ct.configSets, ct.configSetOrderList, ct.activeConfigSetId)
-  local trees = tree_entries()
 
   local loadouts = {}
-  for _, tree in ipairs(trees) do
-    local itemSet = match_family(itemEntries, itemActive, tree.base, tree.linkIds)
-    local skillSet = match_family(skillEntries, skillActive, tree.base, tree.linkIds)
-    local configSet = match_family(configEntries, configActive, tree.base, tree.linkIds)
-    local complete = (itemSet and skillSet and configSet) ~= nil
-    local isActive = complete
-      and tree.id == tt.activeSpec
-      and itemSet.active and skillSet.active and configSet.active
-    table.insert(loadouts, {
-      name = tree.base,
-      title = tree.title,
-      complete = complete,
-      active = isActive == true,
-      treeSpec = entry_report(tree, tt.activeSpec),
-      itemSet = itemSet,
-      skillSet = skillSet,
-      configSet = configSet,
-    })
+  for _, tree in ipairs(tree_entries()) do
+    local refs = {}
+    if next(tree.linkIds) then
+      local ids = {}
+      for linkId in pairs(tree.linkIds) do table.insert(ids, linkId) end
+      table.sort(ids)
+      for _, linkId in ipairs(ids) do
+        table.insert(refs, { title = tree.base .. ' {' .. linkId .. '}', links = { [linkId] = true } })
+      end
+    else
+      table.insert(refs, { title = tree.title, links = {} })
+    end
+    for _, ref in ipairs(refs) do
+      local row = {
+        name = strip_colors(tree.base),
+        title = strip_colors(ref.title),
+        treeSpec = entry_report(tree, tt.activeSpec),
+        itemSet = match_family(itemEntries, itemActive, tree.base, ref.links),
+        skillSet = match_family(skillEntries, skillActive, tree.base, ref.links),
+        configSet = match_family(configEntries, configActive, tree.base, ref.links),
+      }
+      row.complete = (row.itemSet and row.skillSet and row.configSet) ~= nil
+      row.active = row.complete and row.treeSpec.active
+        and row.itemSet.active and row.skillSet.active and row.configSet.active or false
+      table.insert(loadouts, row)
+    end
   end
 
   return {
@@ -2359,91 +2391,80 @@ function M.list_loadouts()
   return build_loadout_list()
 end
 
--- Select a loadout by name (or 1-based index into list_loadouts). Every family that
--- has a matching set is switched; families that do not match are reported as nil
--- rather than silently left in a mixed state.
-function M.select_loadout(params)
-  if not build or not build.treeTab or not build.itemsTab or not build.skillsTab or not build.configTab then
-    return nil, 'build not initialized'
-  end
-  if type(params) ~= 'table' then return nil, 'invalid params' end
+local function loadout_titles(listing)
+  local titles = {}
+  for _, row in ipairs(listing.loadouts) do table.insert(titles, row.title) end
+  return #titles > 0 and table.concat(titles, ', ') or 'none'
+end
 
+-- Select a loadout from list_loadouts by title, by name when that is unambiguous, or by
+-- 1-based index. The row's own matches are used, so a linked loadout selected by its
+-- plain name still switches its linked sets. An incomplete loadout is refused unless
+-- params.allowPartial is set, so the build is never silently left in a mixed state.
+function M.select_loadout(params)
+  if type(params) ~= 'table' then return nil, 'invalid params' end
   local listing, err = build_loadout_list()
   if not listing then return nil, err end
 
+  local row
   local name = params.name or params.title
   if name == nil and params.index ~= nil then
-    local index = tonumber(params.index)
-    local row = index and listing.loadouts[index]
+    row = listing.loadouts[tonumber(params.index) or 0]
     if not row then return nil, 'loadout index out of range: ' .. tostring(params.index) end
-    name = row.title
+  else
+    if type(name) ~= 'string' or name == '' then return nil, 'missing loadout name' end
+    local wanted = strip_colors(name):gsub('^%s+', ''):gsub('%s+$', ''):lower()
+    for _, lo in ipairs(listing.loadouts) do
+      if lo.title:lower() == wanted then row = lo break end
+    end
+    if not row then
+      local hits = {}
+      for _, lo in ipairs(listing.loadouts) do
+        if lo.name:lower() == wanted then table.insert(hits, lo) end
+      end
+      if #hits > 1 then
+        local titles = {}
+        for _, lo in ipairs(hits) do table.insert(titles, lo.title) end
+        return nil, 'loadout name is ambiguous: ' .. name .. ' (use one of: ' .. table.concat(titles, ', ') .. ')'
+      end
+      row = hits[1]
+    end
+    if not row then
+      return nil, 'loadout not found: ' .. name .. ' (available: ' .. loadout_titles(listing) .. ')'
+    end
   end
-  if type(name) ~= 'string' or name == '' then return nil, 'missing loadout name' end
 
+  local missing = missing_families(row)
+  if #missing > 0 and not params.allowPartial then
+    return nil, 'loadout "' .. row.title .. '" is incomplete: no matching ' .. table.concat(missing, ', ')
+      .. '. Nothing was switched. Pass allowPartial to switch only the sets that match.'
+  end
+
+  -- Same order as PoB's loadout dropdown handler.
   local tt, it, st, ct = build.treeTab, build.itemsTab, build.skillsTab, build.configTab
-  local refBase, refLinkIds = link_parts(name)
-
-  local treeMatch
-  for _, tree in ipairs(tree_entries()) do
-    local sameTitle = tree.title:lower() == name:lower() or tree.base:lower() == refBase:lower()
-    local linked = false
-    for linkId in pairs(refLinkIds) do
-      if tree.linkIds[linkId] then linked = true end
-    end
-    if sameTitle or linked then
-      treeMatch = entry_report(tree, tt.activeSpec)
-      break
-    end
-  end
-
-  local itemEntries, itemActive = family_entries(it.itemSets, it.itemSetOrderList, it.activeItemSetId)
-  local skillEntries, skillActive = family_entries(st.skillSets, st.skillSetOrderList, st.activeSkillSetId)
-  local configEntries, configActive = family_entries(ct.configSets, ct.configSetOrderList, ct.activeConfigSetId)
-
-  local itemSet = match_family(itemEntries, itemActive, refBase, refLinkIds)
-  local skillSet = match_family(skillEntries, skillActive, refBase, refLinkIds)
-  local configSet = match_family(configEntries, configActive, refBase, refLinkIds)
-
-  if not treeMatch and not itemSet and not skillSet and not configSet then
-    local names = {}
-    for _, loadout in ipairs(listing.loadouts) do
-      table.insert(names, loadout.name)
-    end
-    return nil, 'loadout not found: ' .. name
-      .. (#names > 0 and (' (available: ' .. table.concat(names, ', ') .. ')') or ' (no loadouts in this build)')
-  end
-
-  if treeMatch and tt.activeSpec ~= treeMatch.id then
-    tt:SetActiveSpec(treeMatch.id)
-  end
-  if itemSet and it.activeItemSetId ~= itemSet.id then
-    if it.SetActiveItemSet then it:SetActiveItemSet(itemSet.id) end
-  end
-  if skillSet and st.activeSkillSetId ~= skillSet.id then
-    if st.SetActiveSkillSet then st:SetActiveSkillSet(skillSet.id) end
-  end
-  if configSet and ct.activeConfigSetId ~= configSet.id then
-    if ct.SetActiveConfigSet then ct:SetActiveConfigSet(configSet.id) end
-  end
+  if row.treeSpec and tt.activeSpec ~= row.treeSpec.id then tt:SetActiveSpec(row.treeSpec.id) end
+  if row.itemSet and it.activeItemSetId ~= row.itemSet.id then it:SetActiveItemSet(row.itemSet.id) end
+  if row.skillSet and st.activeSkillSetId ~= row.skillSet.id then st:SetActiveSkillSet(row.skillSet.id) end
+  if row.configSet and ct.activeConfigSetId ~= row.configSet.id then ct:SetActiveConfigSet(row.configSet.id) end
 
   build.buildFlag = true
   M.get_main_output()
 
-  -- Every matched family was just made active, so refresh the flags in the report
-  -- (the matches above were computed before the switch).
+  -- Report after the switch, so the active flags reflect the new state.
+  local result = build_loadout_list()
   local function mark_active(report)
     if report then report.active = true end
     return report
   end
-
-  local result = build_loadout_list()
   result.selected = {
-    name = refBase,
-    treeSpec = mark_active(treeMatch),
-    itemSet = mark_active(itemSet),
-    skillSet = mark_active(skillSet),
-    configSet = mark_active(configSet),
-    complete = (treeMatch and itemSet and skillSet and configSet) ~= nil,
+    name = row.name,
+    title = row.title,
+    treeSpec = mark_active(row.treeSpec),
+    itemSet = mark_active(row.itemSet),
+    skillSet = mark_active(row.skillSet),
+    configSet = mark_active(row.configSet),
+    complete = #missing == 0,
+    missing = missing,
   }
   return result
 end
