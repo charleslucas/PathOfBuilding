@@ -72,13 +72,31 @@ function M.export_full_stats()
   return result
 end
 
+-- Minion stats sit under output.Minion, not at the top level of a calc result.
+local function minion_dps(out)
+  local minion = out and out.Minion
+  if type(minion) ~= 'table' then return 0 end
+  local combined = tonumber(minion.CombinedDPS) or 0
+  if combined > 0 then return combined end
+  return tonumber(minion.TotalDPS) or 0
+end
+
+-- The main skill's DPS, whether the player or its minions deal it.
+local function main_skill_dps(out)
+  if not out then return 0 end
+  local player = tonumber(out.CombinedDPS) or 0
+  if player <= 0 then player = tonumber(out.TotalDPS) or 0 end
+  if player > 0 then return player end
+  return minion_dps(out)
+end
+
 function M.export_stats(fields)
   local output, err = M.get_main_output()
   if not output then
     return nil, err
   end
   local wanted = fields or {
-    "TotalDPS", "CombinedDPS", "FullDPS", "MinionTotalDPS",
+    "TotalDPS", "CombinedDPS", "FullDPS", "MinionTotalDPS", "MinionCombinedDPS",
     "Life", "EnergyShield", "Armour", "Evasion",
     "FireResist", "ColdResist", "LightningResist", "ChaosResist",
     "BlockChance", "SpellBlockChance",
@@ -87,9 +105,13 @@ function M.export_stats(fields)
     "TotalEHP",
   }
   local result = {}
+  local minion = type(output.Minion) == 'table' and output.Minion or nil
   for _, k in ipairs(wanted) do
     if type(output[k]) ~= 'nil' then
       result[k] = output[k]
+    elseif minion and k:sub(1, 6) == 'Minion' and type(minion[k:sub(7)]) ~= 'nil' then
+      -- "MinionTotalDPS" and friends are requested flat but stored as Minion.TotalDPS.
+      result[k] = minion[k:sub(7)]
     end
   end
   -- include some metadata if available
@@ -2337,9 +2359,20 @@ function M.evaluate_anoint_candidates(params)
     return nil, 'failed to get calc function'
   end
 
+  -- Scoring reads the main skill only, so skip Full DPS: on a large minion build it
+  -- costs seconds per candidate, across ~400 candidates.
+  local savedViewMode = build.viewMode
+  build.viewMode = 'CALCULATOR'
+
   -- Base stats without any anoint
-  local baseCalc = calcFunc({ repSlotName = slotType, repItem = build.itemsTab:anointItem(nil) })
-  local baseDPS  = baseCalc and (baseCalc.CombinedDPS or baseCalc.TotalDPS or 0) or 0
+  local okBase, baseCalc = pcall(calcFunc, { repSlotName = slotType, repItem = build.itemsTab:anointItem(nil) }, false)
+  if not okBase then
+    build.viewMode = savedViewMode
+    build.itemsTab.displayItem     = savedDisplayItem
+    build.itemsTab.anointEnchantSlot = savedAnointSlot
+    return nil, 'baseline calc failed: ' .. tostring(baseCalc)
+  end
+  local baseDPS  = main_skill_dps(baseCalc)
   local baseEHP  = baseCalc and (baseCalc.TotalEHP or 0) or 0
 
   local candidates = {}
@@ -2351,10 +2384,10 @@ function M.evaluate_anoint_candidates(params)
     if node.recipe and #node.recipe >= 1 and node.isNotable and not node.isKeystone
         and not node.ascendancyName and not build.spec.allocNodes[id] then
       local ok, output = pcall(function()
-        return calcFunc({ repSlotName = slotType, repItem = build.itemsTab:anointItem(node) })
+        return calcFunc({ repSlotName = slotType, repItem = build.itemsTab:anointItem(node) }, false)
       end)
       if ok and output then
-        local dps      = output.CombinedDPS or output.TotalDPS or 0
+        local dps      = main_skill_dps(output)
         local ehp      = output.TotalEHP or 0
         local dpsDelta = dps - baseDPS
         local ehpDelta = ehp - baseEHP
@@ -2384,6 +2417,7 @@ function M.evaluate_anoint_candidates(params)
   end
 
   -- Restore state
+  build.viewMode = savedViewMode
   build.itemsTab.displayItem     = savedDisplayItem
   build.itemsTab.anointEnchantSlot = savedAnointSlot
 
@@ -2468,7 +2502,7 @@ function M.probe_stat_weights(params)
     local out = calcFunc({ repSlotName = repSlot, repItem = baseItem })
     baseDPS = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
     baseEHP = out and (out.TotalEHP or 0) or 0
-    baseMinionDPS = out and (out.MinionCombinedDPS or out.MinionTotalDPS or 0) or 0
+    baseMinionDPS = minion_dps(out)
     baseFullDPS = out and (out.FullDPS or 0) or 0
   end)
   if not okBase then
@@ -2486,7 +2520,7 @@ function M.probe_stat_weights(params)
         local out = calcFunc({ repSlotName = repSlot, repItem = probeItem })
         local dps = out and (out.CombinedDPS or out.TotalDPS or 0) or 0
         local ehp = out and (out.TotalEHP or 0) or 0
-        local mdps = out and (out.MinionCombinedDPS or out.MinionTotalDPS or 0) or 0
+        local mdps = minion_dps(out)
         local fdps = out and (out.FullDPS or 0) or 0
         -- Distinguish "no effect on this build" from "PoB didn't understand
         -- the mod line": an unrecognized line parses with .extra set.
