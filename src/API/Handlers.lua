@@ -335,6 +335,12 @@ handlers.add_item_text = function(params)
   return { ok = true, item = res }
 end
 
+handlers.restore_item_slot = function(params)
+  local res, err = BuildOps.restore_item_slot(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.clear_item_slot = function(params)
   local res, err = BuildOps.clear_item_slot(params or {})
   if not res then return { ok = false, error = err } end
@@ -658,6 +664,24 @@ handlers.list_loadouts = function(params)
   return { ok = true, result = res }
 end
 
+handlers.create_skill_set = function(params)
+  local res, err = BuildOps.create_skill_set(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.create_config_set = function(params)
+  local res, err = BuildOps.create_config_set(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
+handlers.create_loadout = function(params)
+  local res, err = BuildOps.create_loadout(params or {})
+  if not res then return { ok = false, error = err } end
+  return { ok = true, result = res }
+end
+
 handlers.select_loadout = function(params)
   local res, err = BuildOps.select_loadout(params or {})
   if not res then return { ok = false, error = err } end
@@ -865,6 +889,12 @@ if HEADLESS then
       end
     end
   end
+end
+
+handlers.get_warnings = function()
+  local res, err = BuildOps.get_warnings()
+  if not res then return { ok = false, error = err or 'failed' } end
+  return { ok = true, warnings = res.warnings, count = res.count }
 end
 
 return {

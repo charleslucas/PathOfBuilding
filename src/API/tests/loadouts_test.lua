@@ -116,5 +116,79 @@ do
     and b.itemsTab.activeItemSetId == 2 and b.skillsTab.activeSkillSetId == 2)
 end
 
+-- Set creation. copyTable is PoB's (Modules/Common.lua); the stubs mirror NewSkillSet / NewConfigSet.
+function copyTable(tbl, noRecurse)
+  local out = {}
+  for k, v in pairs(tbl) do
+    if not noRecurse and type(v) == 'table' then out[k] = copyTable(v) else out[k] = v end
+  end
+  return out
+end
+
+local function add_set_creation(b)
+  function b.skillsTab:NewSkillSet(id) local s = { id = id, socketGroupList = {} }; self.skillSets[id] = s; return s end
+  function b.configTab:NewConfigSet(id)
+    local s = { id = id, input = {}, placeholder = {}, customModsList = { { title = 'Default', enabled = true, text = '' } } }
+    self.configSets[id] = s
+    return s
+  end
+  function b:SyncLoadouts() end
+end
+
+do
+  local b = make_build({ 'Main' }, { 'Main' }, { 'Main' }, { 'Main' })
+  add_set_creation(b)
+  build = b
+  b.skillsTab.skillSets[1].socketGroupList = { { label = 'SRS', gemList = { { nameSpec = 'Summon Raging Spirit', level = 20 } } } }
+  b.configTab.configSets[1].input = { enemyIsBoss = 'Pinnacle' }
+  b.configTab.configSets[1].customModsList = { { title = 'Default', enabled = true, text = '+1 to Level of all Gems' } }
+
+  local res = M.create_skill_set({ title = 'Copy', copyFrom = 1 })
+  check('skill set created', res ~= nil and b.skillsTab.skillSets[2] and b.skillsTab.skillSetOrderList[2] == 2)
+  local copied = b.skillsTab.skillSets[2].socketGroupList[1].gemList[1]
+  copied.level = 1
+  check('gem copy is independent', b.skillsTab.skillSets[1].socketGroupList[1].gemList[1].level == 20)
+
+  M.create_config_set({ title = 'Copy', copyFrom = 1 })
+  local cfg = b.configTab.configSets[2]
+  check('config input copied', cfg.input.enemyIsBoss == 'Pinnacle')
+  cfg.customModsList[1].text = 'changed'
+  check('custom mods copy is independent', b.configTab.configSets[1].customModsList[1].text == '+1 to Level of all Gems')
+
+  local _, err = M.create_skill_set({ copyFrom = 99 })
+  check('unknown copyFrom refused', err and err:find('99') ~= nil)
+end
+
+-- create_loadout reuses families that already have the title and creates the rest.
+do
+  local b = make_build({ 'Main', 'Bossing' }, { 'Main', 'Bossing' }, { 'Main', 'Leveling' }, { 'Main', 'Leveling' })
+  add_set_creation(b)
+  build = b
+  local res, err = M.create_loadout({ title = '  Bossing ', copyFrom = { skills = 1, config = 1 } })
+  check('create_loadout succeeds: ' .. tostring(err), res ~= nil)
+  check('tree and items reused, not duplicated', #b.treeTab.specList == 2 and #b.itemsTab.itemSetOrderList == 2)
+  check('skill and config sets created with the title', b.skillsTab.skillSets[3].title == 'Bossing'
+    and b.configTab.configSets[3].title == 'Bossing')
+  check('created reported', res and res.created.skills and res.created.config and not res.created.items)
+  check('new loadout is complete and active', res and res.selected and res.selected.complete
+    and b.treeTab.activeSpec == 2 and b.skillsTab.activeSkillSetId == 3 and b.configTab.activeConfigSetId == 3)
+  local _, err2 = M.create_loadout({ title = '   ' })
+  check('blank title refused', err2 == 'title required')
+end
+
+-- A family with a single set is a wildcard shared by every loadout; creating a
+-- loadout must not add a second set there (that would orphan the other loadouts).
+do
+  local b = make_build({ 'Main', 'Bossing' }, { 'Main', 'Bossing' }, { 'Default' }, { 'Default' })
+  add_set_creation(b)
+  build = b
+  local res, err = M.create_loadout({ title = 'Bossing' })
+  check('wildcard create succeeds: ' .. tostring(err), res ~= nil)
+  check('single-set families stay single', #b.skillsTab.skillSetOrderList == 1 and #b.configTab.configSetOrderList == 1)
+  check('shared reported', res and res.shared.skills and res.shared.config)
+  local list = M.list_loadouts()
+  check('existing loadout still complete', list.loadouts[1].complete)
+end
+
 print(failures == 0 and 'ALL PASSED' or (failures .. ' FAILED'))
 os.exit(failures == 0 and 0 or 1)

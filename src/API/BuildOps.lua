@@ -1173,6 +1173,35 @@ function M.clear_item_slot(params)
   return { slot = params.slotName, cleared = true }
 end
 
+-- Put a slot back to an existing item and delete scratch items, e.g. after a
+-- compare that equipped candidates one at a time via add_item_text. Restoring by
+-- id keeps the original item (no duplicate copy), and deleting the candidates
+-- leaves the item list as it was.
+-- params: { slotName: string, itemId: number (0 = empty), deleteIds?: number[] }
+function M.restore_item_slot(params)
+  if not build or not build.itemsTab then return nil, 'items not initialized' end
+  if type(params) ~= 'table' or type(params.slotName) ~= 'string' then return nil, 'slotName required' end
+  local it = build.itemsTab
+  local slot = it.slots[params.slotName]
+  if not slot then return nil, 'slot not found: ' .. params.slotName end
+  local itemId = tonumber(params.itemId) or 0
+  if itemId ~= 0 and not it.items[itemId] then return nil, 'no item with id ' .. tostring(itemId) end
+  slot:SetSelItemId(itemId)
+  local deleted = {}
+  for _, id in ipairs(params.deleteIds or {}) do
+    id = tonumber(id)
+    if id and id ~= itemId and it.items[id] then
+      it:DeleteItem(it.items[id], true)
+      table.insert(deleted, id)
+    end
+  end
+  it:PopulateSlots()
+  it:AddUndoState()
+  build.buildFlag = true
+  M.get_main_output()
+  return { slot = params.slotName, itemId = itemId, deleted = deleted }
+end
+
 function M.set_flask_active(params)
   if not build or not build.itemsTab then return nil, 'items not initialized' end
   if type(params) ~= 'table' then return nil, 'invalid params' end
@@ -1983,6 +2012,11 @@ function M.create_spec(params)
     newSpec.title = params.title or ((src.title or 'Default') .. ' (copy)')
     newSpec.jewels = copyTable(src.jewels)
     newSpec:RestoreUndoState(src:CreateUndoState(), src.treeVersion)
+    -- As TreeTab:ConvertToVersion does: cluster-jewel subgraph nodes (ids >= 65536)
+    -- and nodes reached through them are only queued by ImportFromNodeList and get
+    -- allocated here. Without it a copied spec silently lost them (seen live: two
+    -- jewel sockets and five cluster nodes missing, -44% FullDPS).
+    if newSpec.BuildClusterJewelGraphs then newSpec:BuildClusterJewelGraphs() end
   else
     newSpec = construct("PassiveSpec", build, latestTreeVersion)
     newSpec.title = (params and params.title) or ('Spec ' .. tostring(#specs + 1))
@@ -2249,6 +2283,159 @@ end
 
 
 -- ============================================================
+-- Skill / config set creation, and whole-loadout creation
+-- ============================================================
+-- A loadout is not stored data: PoB (Modules/Build.lua:SyncLoadouts) derives it
+-- from one set per family that shares a title. Creating one therefore means
+-- creating a tree spec + item set + skill set + config set with the same title.
+-- create_spec and create_item_set already existed; these fill the two missing
+-- families and tie all four together.
+
+-- PoB's own undo-state copy pattern (SkillsTab:CreateUndoState): a shallow
+-- copyTable (noRecurse) of each group, then one per gem, so gem tables are not
+-- shared between sets (sharing them made a level change in one set silently
+-- apply to the other). Gem fields that stay shared (gemData, grantedEffect) are
+-- read-only game data.
+local function copy_socket_groups(srcGroups)
+  local out = {}
+  for i, group in ipairs(srcGroups or {}) do
+    local g = copyTable(group, true)
+    g.gemList = {}
+    for j, gem in ipairs(group.gemList or {}) do
+      g.gemList[j] = copyTable(gem, true)
+    end
+    out[i] = g
+  end
+  return out
+end
+
+local function find_title_in_order(order, sets, title)
+  for _, id in ipairs(order or {}) do
+    local s = sets and sets[id]
+    if s and (s.title or 'Default') == title then return id end
+  end
+  return nil
+end
+
+function M.create_skill_set(params)
+  if not build or not build.skillsTab then return nil, 'build not initialized' end
+  local st = build.skillsTab
+  local sets = st.skillSets or {}
+  if params and params.copyFrom and not sets[params.copyFrom] then
+    return nil, 'no skill set with id ' .. tostring(params.copyFrom)
+  end
+  local newId = 1
+  while sets[newId] do newId = newId + 1 end
+  local newSet = st:NewSkillSet(newId)
+  newSet.title = (params and params.title) or ('Skill Set ' .. tostring(newId))
+  if params and params.copyFrom and sets[params.copyFrom] then
+    newSet.socketGroupList = copy_socket_groups(sets[params.copyFrom].socketGroupList)
+  end
+  table.insert(st.skillSetOrderList, newId)
+  if params and params.activate then
+    st:SetActiveSkillSet(newId)
+    build.buildFlag = true
+    M.get_main_output()
+  end
+  return get_skillset_list()
+end
+
+function M.create_config_set(params)
+  if not build or not build.configTab then return nil, 'build not initialized' end
+  local ct = build.configTab
+  local sets = ct.configSets or {}
+  if params and params.copyFrom and not sets[params.copyFrom] then
+    return nil, 'no config set with id ' .. tostring(params.copyFrom)
+  end
+  local newId = 1
+  while sets[newId] do newId = newId + 1 end
+  local src = params and params.copyFrom and sets[params.copyFrom] or nil
+  local newSet = ct:NewConfigSet(newId)
+  newSet.title = (params and params.title) or ('Config Set ' .. tostring(newId))
+  if src then
+    -- Deep copies: customModsList holds one table per custom-mod entry, and a
+    -- shallow copy would let editing one set's custom mods change the other's.
+    newSet.input = src.input and copyTable(src.input) or newSet.input
+    newSet.placeholder = src.placeholder and copyTable(src.placeholder) or newSet.placeholder
+    newSet.customModsList = src.customModsList and copyTable(src.customModsList) or newSet.customModsList
+  end
+  table.insert(ct.configSetOrderList, newId)
+  if params and params.activate then
+    ct:SetActiveConfigSet(newId)
+    build.buildFlag = true
+    M.get_main_output()
+  end
+  return get_configset_list()
+end
+
+-- params: { title = string, copyFrom = { spec, items, skills, config }, activate? }
+-- Families that already contain a set with this title are reused instead of
+-- duplicated, so re-running is safe (e.g. an item set created earlier).
+-- A gear/skill/config family with exactly ONE set is a wildcard in SyncLoadouts:
+-- that set belongs to every loadout. Adding a second set would end the wildcard
+-- and leave every existing loadout without a match in that family, so such a
+-- family is shared (reported in `shared`), not given a new set.
+function M.create_loadout(params)
+  if not build then return nil, 'build not initialized' end
+  local title = params and params.title
+  if type(title) ~= 'string' or title:match('^%s*$') then return nil, 'title required' end
+  title = title:gsub('^%s+', ''):gsub('%s+$', '')
+  local src = (params and params.copyFrom) or {}
+  local created, shared = {}, {}
+  local function needs_set(order, sets, key)
+    if find_title_in_order(order, sets, title) then return false end
+    if #(order or {}) == 1 then shared[key] = true return false end
+    return true
+  end
+
+  local specs = build.treeTab and build.treeTab.specList or {}
+  local specExists = false
+  for _, spec in ipairs(specs) do
+    if (spec.title or 'Default') == title then specExists = true break end
+  end
+  if not specExists then
+    local _, err = M.create_spec({ title = title, copyFrom = src.spec })
+    if err then return nil, 'spec: ' .. err end
+    created.spec = true
+  end
+
+  local it = build.itemsTab
+  if not it then return nil, 'items not initialized' end
+  if needs_set(it.itemSetOrderList, it.itemSets, 'items') then
+    local _, err = M.create_item_set({ title = title, copyFrom = src.items })
+    if err then return nil, 'items: ' .. err end
+    created.items = true
+  end
+
+  local st = build.skillsTab
+  if not st then return nil, 'skills not initialized' end
+  if needs_set(st.skillSetOrderList, st.skillSets, 'skills') then
+    local _, err = M.create_skill_set({ title = title, copyFrom = src.skills })
+    if err then return nil, 'skills: ' .. err end
+    created.skills = true
+  end
+
+  local ct = build.configTab
+  if not ct then return nil, 'config not initialized' end
+  if needs_set(ct.configSetOrderList, ct.configSets, 'config') then
+    local _, err = M.create_config_set({ title = title, copyFrom = src.config })
+    if err then return nil, 'config: ' .. err end
+    created.config = true
+  end
+
+  build:SyncLoadouts()
+  build.buildFlag = true
+  if params and params.activate == false then
+    return { title = title, created = created, shared = shared, activated = false }
+  end
+  local res, err = M.select_loadout({ name = title })
+  if not res then return nil, err end
+  res.created, res.shared = created, shared
+  return res
+end
+
+
+-- ============================================================
 -- Loadouts
 -- ============================================================
 -- PoB does not store loadouts as data: buildMode:SyncLoadouts() (Modules/Build.lua)
@@ -2304,7 +2491,7 @@ end
 
 -- Match one family to a loadout name/link. With a single set in the family PoB
 -- treats it as a wildcard; otherwise linked titles match by shared identifier and
--- plain titles match by name (case-insensitive).
+-- plain titles match by exact name, as in SyncLoadouts.
 local function match_family(entries, activeId, refBase, refLinkIds)
   if #entries == 0 then return nil end
   local hasLinks = next(refLinkIds) ~= nil
@@ -3435,6 +3622,39 @@ function M.get_ailments()
     end
   end
   return { ailments = result }
+end
+
+-- PoB's own warning list: the exact lines rendered behind the "N Warnings" bar
+-- in the GUI (Build.lua: self.controls.warnings.lines). This is the only
+-- reliable source for things PoB validates internally but never exposes as a
+-- stat: unmet attribute requirements ("You do not meet the Dexterity
+-- requirement of Faster Attacks"), unreserved-mana problems, passive point
+-- overruns, and so on. buildMode:RefreshStatList() is what clears and refills
+-- the list (OnFrame calls it after each rebuild), so rebuild the output and call
+-- it here; otherwise the lines are from the last frame, before any API change in
+-- this request.
+function M.get_warnings()
+  if not build then
+    return nil, "build not initialized"
+  end
+  if build.calcsTab and build.calcsTab.BuildOutput then
+    build.calcsTab:BuildOutput()
+  end
+  if build.RefreshStatList and build.controls and build.controls.warnings then
+    local ok, err = pcall(build.RefreshStatList, build)
+    if not ok then return nil, "RefreshStatList failed: " .. tostring(err) end
+  end
+  local lines = build.controls and build.controls.warnings and build.controls.warnings.lines
+  local out = {}
+  if type(lines) == "table" then
+    for _, line in pairs(lines) do
+      if type(line) == "string" then
+        table.insert(out, line)
+      end
+    end
+  end
+  table.sort(out)
+  return { warnings = out, count = #out }
 end
 
 return M
