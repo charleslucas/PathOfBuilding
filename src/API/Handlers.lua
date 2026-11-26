@@ -857,9 +857,48 @@ handlers.import_items_skills = function(params)
   end
   local charData = (type(resp.character) == 'table') and resp.character or {}
   charData.equipment = resp.items
+  -- Mirror PoB's DownloadItems (guardian) and the OAuth shape (wickerman) when present.
+  if type(resp.guardian) == 'table' then charData.guardian = resp.guardian end
+  if type(resp.wickerman) == 'table' then charData.wickerman = resp.wickerman end
+
+  -- 3.30 Wickerman slots (Head/Body/Arm/Leg). The legacy get-items response is not known to
+  -- carry Viscera, and the clear pass deletes every equipped item, so a re-import silently
+  -- removed them. When the response has no Viscera at all, detach the equipped ones before
+  -- the clear pass and put them back afterwards (only into slots the import left empty).
+  local clearItems = params.clear_items ~= false
+  local itemsTab = build.itemsTab
+  local hasViscera = type(charData.wickerman) == 'table' and charData.wickerman[1] ~= nil
+  for _, it in ipairs(type(resp.items) == 'table' and resp.items or {}) do
+    if type(it) == 'table' and type(it.inventoryId) == 'string' and it.inventoryId:match('^Viscera') then
+      hasViscera = true
+    end
+  end
+  local kept = {}
+  if clearItems and not hasViscera and itemsTab and itemsTab.slots then
+    for _, name in ipairs({ 'Head', 'Body', 'Arm', 'Leg' }) do
+      local slot = itemsTab.slots[name]
+      local id = slot and slot.selItemId or 0
+      if id ~= 0 and itemsTab.items[id] then
+        kept[#kept + 1] = { slot = name, id = id }
+        slot:SetSelItemId(0)
+      end
+    end
+  end
 
   local ok, ret = pcall(build.importTab.ImportItemsAndSkills, build.importTab, charData,
-    params.clear_items ~= false, params.clear_skills ~= false, params.ignore_weapon_swap == true)
+    clearItems, params.clear_skills ~= false, params.ignore_weapon_swap == true)
+
+  -- Reattach even when the import threw, so a failure never loses the Viscera.
+  local keptNames = {}
+  for _, k in ipairs(kept) do
+    local slot = itemsTab.slots[k.slot]
+    if slot and itemsTab.items[k.id] and (slot.selItemId or 0) == 0 then
+      slot:SetSelItemId(k.id)
+      keptNames[#keptNames + 1] = k.slot
+    end
+  end
+  if #kept > 0 then itemsTab:PopulateSlots() end
+
   if not ok then
     return { ok = false, error = 'import_items_skills exception: ' .. tostring(ret) }
   end
@@ -870,6 +909,7 @@ handlers.import_items_skills = function(params)
     status    = 'Items and skills imported',
     level     = (type(ret) == 'table' and ret.level) or (type(charData) == 'table' and charData.level) or nil,
     character = (type(ret) == 'table' and ret) or charData,
+    keptWickerman = keptNames,
   }
 end
 
